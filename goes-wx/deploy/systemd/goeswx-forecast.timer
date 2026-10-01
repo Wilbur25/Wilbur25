@@ -1,0 +1,10 @@
+[Unit]
+Description=goeswx: run forecast every hour (skips if no new GFS run)
+
+[Timer]
+OnCalendar=*:20
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

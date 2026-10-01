@@ -1,0 +1,11 @@
+[Unit]
+Description=goeswx: retrain the local forecast correction
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/.venv/bin/goeswx train
+Nice=10
+TimeoutStartSec=1800

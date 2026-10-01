@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goeswx"
+version = "0.1.0"
+description = "Home weather station built on GOES East imagery, GLM lightning and GFS model data from AWS"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "xarray",
+    "netCDF4",
+    "pyproj",
+    "cartopy",
+    "matplotlib",
+    "requests",
+    "pyyaml",
+    "imageio",
+    "imageio-ffmpeg",
+    "eccodes",
+    "scikit-learn",
+    "joblib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+goeswx = "goeswx.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["goeswx*"]
+
+[tool.setuptools.package-data]
+goeswx = ["web/*.html"]

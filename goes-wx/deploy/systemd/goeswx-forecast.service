@@ -1,0 +1,11 @@
+[Unit]
+Description=goeswx: multi-day forecast from the newest GFS run
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/.venv/bin/goeswx forecast
+Nice=10
+TimeoutStartSec=1800

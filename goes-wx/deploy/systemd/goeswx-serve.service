@@ -1,0 +1,11 @@
+[Unit]
+Description=goeswx: serve the dashboard on port 8080
+After=network-online.target
+
+[Service]
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/.venv/bin/goeswx serve --port 8080
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=goeswx: imagery, timelapse, current conditions, dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@APP_DIR@
+ExecStart=@APP_DIR@/.venv/bin/goeswx tick
+Nice=10
+TimeoutStartSec=600

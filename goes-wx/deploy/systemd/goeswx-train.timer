@@ -1,0 +1,10 @@
+[Unit]
+Description=goeswx: run train nightly
+
+[Timer]
+OnCalendar=03:30
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

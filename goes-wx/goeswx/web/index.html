@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Weather</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0b1118; --panel: #121b26; --panel2: #182433; --text: #e6edf3; --muted: #8b9bb0;
+    --accent: #4ac6ff; --warm: #ff8a5c; --cool: #6cb6ff; --alert: #ffcc33; --border: #223246;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px;
+           padding: 16px 20px 8px; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 650; }
+  header .muted { font-size: 13px; }
+  main { padding: 8px 16px 40px; max-width: 1400px; margin: 0 auto; display: grid; gap: 16px;
+         grid-template-columns: minmax(0, 1fr) 380px; }
+  @media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .full { grid-column: 1 / -1; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .tabs button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+                 border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .tabs button.on { background: var(--accent); color: #04121c; border-color: var(--accent); font-weight: 600; }
+  .tabs .sep { flex: 1; }
+  .media img, .media video { width: 100%; display: block; border-radius: 8px; background: #000; }
+  .big { font-size: 56px; font-weight: 300; line-height: 1; }
+  .cond { font-size: 18px; margin: 6px 0 14px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 14px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .raw { font: 12px ui-monospace, monospace; color: var(--muted); margin-top: 12px; word-break: break-word; }
+  .alert { background: #3a2e00; border: 1px solid var(--alert); color: var(--alert);
+           border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-weight: 600; }
+  .days { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+  .day { background: var(--panel2); border-radius: 10px; padding: 10px; text-align: center; }
+  .day .wd { font-weight: 600; } .day .ic { font-size: 30px; margin: 4px 0; }
+  .day .hi { color: var(--warm); font-size: 20px; font-weight: 600; } .day .lo { color: var(--cool); }
+  .day .sm { font-size: 12px; color: var(--muted); }
+  .hourly { overflow-x: auto; }
+  .hourly table { border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+  .hourly td, .hourly th { padding: 4px 8px; text-align: center; }
+  .hourly th { color: var(--muted); font-weight: 500; text-align: left; position: sticky; left: 0; background: var(--panel); }
+  .hourly tr:first-child td { font-weight: 600; }
+  .hourly td.nt { background: #0e1620; }
+  .bar { display: inline-block; width: 8px; background: var(--accent); vertical-align: bottom; border-radius: 2px; }
+  .model td { padding: 3px 10px 3px 0; font-size: 14px; }
+  .pill { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--panel2); }
+  .pill.ok { background: #12391f; color: #7ee2a0; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 0 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Home Weather</h1>
+  <span class="muted" id="updated"></span>
+</header>
+<main>
+  <section>
+    <div class="tabs" id="prodTabs"></div>
+    <div class="media" id="media"></div>
+    <div class="muted" id="mediaNote" style="font-size:12px;margin-top:6px"></div>
+  </section>
+
+  <section id="current"><h2>Now</h2><div class="muted">Waiting for data…</div></section>
+
+  <section class="full"><h2>Forecast</h2><div class="days" id="days"></div></section>
+
+  <section class="full hourly"><h2>Next 48 hours</h2><div id="hourly"></div></section>
+
+  <section class="full"><h2>Meteogram</h2><div class="media"><img id="meteogram" alt="Forecast meteogram"></div></section>
+
+  <section>
+    <h2>Forecast maps</h2>
+    <div class="tabs" id="mapTabs"></div>
+    <div class="tabs" id="mapDays"></div>
+    <div class="media"><img id="mapImg" alt="Forecast map"></div>
+  </section>
+
+  <section id="model"><h2>Model</h2></section>
+</main>
+<footer>Data: NOAA GOES-19 ABI &amp; GLM, NOAA GFS (AWS Open Data), aviationweather.gov. Not an official forecast.</footer>
+
+<script>
+const PRODUCT_NAMES = { truecolor: "True color", ir: "Infrared", watervapor: "Water vapor", airmass: "Airmass" };
+let site = null, state = { product: null, loop: false, mapKind: "tmax", mapDay: 0 };
+const bust = () => "?v=" + Math.floor(Date.now() / 60000);
+
+async function getJSON(path) {
+  try { const r = await fetch(path + bust()); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
+const imp = () => site && site.units === "imperial";
+const T = c => c == null ? "–" : Math.round(imp() ? c * 9 / 5 + 32 : c) + "°";
+const S = ms => ms == null ? "–" : Math.round(imp() ? ms * 2.23694 : ms * 3.6) + (imp() ? " mph" : " km/h");
+const P = mm => mm == null ? "–" : imp() ? (mm / 25.4).toFixed(2) + " in" : mm.toFixed(1) + " mm";
+const PR = h => h == null ? "–" : imp() ? (h * 0.02953).toFixed(2) + " inHg" : h.toFixed(1) + " hPa";
+const DIRS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const compass = d => (d == null || isNaN(+d)) ? (d || "") : DIRS[Math.round((+d % 360) / 22.5) % 16];
+const ago = iso => { const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.round(m / 60) + " h ago"; };
+const rh = (t, d) => (t == null || d == null) ? null :
+  Math.round(100 * Math.exp(17.625 * d / (243.04 + d)) / Math.exp(17.625 * t / (243.04 + t)));
+const el = (tag, attrs = {}, text) => { const e = document.createElement(tag);
+  Object.assign(e, attrs); if (text != null) e.textContent = text; return e; };
+
+function renderMedia() {
+  const tabs = document.getElementById("prodTabs"); tabs.innerHTML = "";
+  for (const p of site.products) {
+    const b = el("button", { className: p === state.product ? "on" : "" }, PRODUCT_NAMES[p] || p);
+    b.onclick = () => { state.product = p; renderMedia(); }; tabs.append(b);
+  }
+  tabs.append(el("span", { className: "sep" }));
+  for (const [label, loop] of [["Latest", false], [`${site.timelapse_hours} h loop`, true]]) {
+    const b = el("button", { className: state.loop === loop ? "on" : "" }, label);
+    b.onclick = () => { state.loop = loop; renderMedia(); }; tabs.append(b);
+  }
+  const media = document.getElementById("media"); media.innerHTML = "";
+  const latest = site.latest[state.product];
+  if (state.loop) {
+    const v = el("video", { src: `timelapse/${state.product}.mp4${bust()}`, autoplay: true, loop: true,
+                            muted: true, playsInline: true, controls: true });
+    media.append(v);
+    document.getElementById("mediaNote").textContent = "Loops rebuild every few minutes.";
+  } else if (latest) {
+    media.append(el("img", { src: `frames/${state.product}/${latest.file}`, alt: state.product }));
+    document.getElementById("mediaNote").textContent = `Scan ${new Date(latest.time).toLocaleString()} (${ago(latest.time)})`;
+  } else {
+    media.append(el("div", { className: "muted" }, "No frames yet. Run: goeswx imagery"));
+  }
+}
+
+function renderCurrent(cur, fc) {
+  const box = document.getElementById("current"); box.innerHTML = "<h2>Now</h2>";
+  if (!cur) { box.append(el("div", { className: "muted" }, "No current data yet.")); return; }
+  const st = cur.station, sat = cur.satellite;
+  const lt = sat && sat.lightning;
+  if (lt && lt.flashes_nearby > 0)
+    box.append(el("div", { className: "alert" },
+      `⚡ ${lt.flashes_nearby} lightning flashes within ${site.lightning_radius_km} km (nearest ${lt.nearest_km} km)`));
+  if (st) {
+    box.append(el("div", { className: "big" }, T(st.t2m)));
+    const sky = st.weather || (st.clouds && st.clouds.length ? st.clouds.join(", ") : "");
+    box.append(el("div", { className: "cond" }, sky || " "));
+    const kv = el("div", { className: "kv" });
+    const rows = [
+      ["Dew point", T(st.d2m)], ["Humidity", rh(st.t2m, st.d2m) == null ? "–" : rh(st.t2m, st.d2m) + "%"],
+      ["Wind", `${compass(st.wdir)} ${S(st.wspd)}${st.gust ? ", gusts " + S(st.gust) : ""}`],
+      ["Pressure", PR(st.mslp)], ["Visibility", st.visibility_mi != null ? st.visibility_mi + " mi" : "–"],
+      ["Observed", `${st.station} · ${ago(st.valid)}`],
+    ];
+    rows.forEach(([k, v]) => { kv.append(el("div", {}, k), el("div", {}, v)); });
+    box.append(kv);
+    if (st.raw) box.append(el("div", { className: "raw" }, st.raw));
+  } else {
+    box.append(el("div", { className: "muted" }, "Station observation unavailable."));
+  }
+  if (sat) {
+    box.append(el("h2", { style: "margin-top:16px" }, "Overhead (GOES)"));
+    const kv = el("div", { className: "kv" });
+    const sky = sat.deep_convection ? "Deep convective cloud" : sat.cloudy ? "Cloudy" : "Clear";
+    [["Sky", sky], ["Cloud-top / surface temp", T(sat.cloud_top_temp_c)],
+     ["Lightning (region, 10 min)", lt ? `${lt.flashes_region} flashes` + (lt.nearest_km != null ? `, nearest ${lt.nearest_km} km` : "") : "–"],
+     ["Scan", ago(sat.time)]].forEach(([k, v]) => kv.append(el("div", {}, k), el("div", {}, v)));
+    box.append(kv);
+  }
+}
+
+function renderForecast(fc) {
+  const days = document.getElementById("days"); days.innerHTML = "";
+  if (!fc) { days.append(el("div", { className: "muted" }, "No forecast yet. Run: goeswx forecast")); return; }
+  for (const d of fc.daily) {
+    const c = el("div", { className: "day", title: d.condition });
+    c.append(el("div", { className: "wd" }, d.weekday + (d.partial ? "*" : "")),
+             el("div", { className: "sm" }, d.date.slice(5)),
+             el("div", { className: "ic" }, d.icon || "·"),
+             el("div", {}, ""));
+    const t = c.lastChild;
+    t.append(el("span", { className: "hi" }, T(d.high_c)), el("span", { className: "lo" }, "  " + T(d.low_c)));
+    c.append(el("div", { className: "sm" }, d.condition),
+             el("div", { className: "sm" }, "💧 " + P(d.precip_mm)),
+             el("div", { className: "sm" }, "Gusts " + S(d.max_gust_ms)));
+    days.append(c);
+  }
+  // hourly strip
+  const now = Date.now();
+  const hrs = fc.hourly.filter(h => new Date(h.valid) >= now - 3 * 3600e3).slice(0, 17);
+  const tbl = el("table");
+  const maxP = Math.max(0.5, ...hrs.map(h => h.precip_mm || 0));
+  const rows = [
+    ["", h => new Date(h.valid).toLocaleString([], { weekday: "short", hour: "numeric" })],
+    ["", h => h.icon], ["Temp", h => T(h.t2m_c)], ["Dew pt", h => T(h.d2m_c)],
+    ["Wind", h => `${compass(h.wdir)} ${S(h.wspd_ms)}`], ["Gust", h => S(h.gust_ms)],
+    ["Cloud", h => h.cloud_pct == null ? "–" : h.cloud_pct + "%"],
+    ["Precip", h => h.precip_mm > 0.05 ? P(h.precip_mm) : ""],
+  ];
+  for (const [label, f] of rows) {
+    const tr = el("tr"); tr.append(el("th", {}, label));
+    for (const h of hrs) tr.append(el("td", { className: h.night ? "nt" : "" }, f(h)));
+    tbl.append(tr);
+  }
+  const box = document.getElementById("hourly"); box.innerHTML = ""; box.append(tbl);
+  document.getElementById("meteogram").src = "meteogram.png" + bust();
+}
+
+function renderMaps(maps) {
+  const tabs = document.getElementById("mapTabs"), dayTabs = document.getElementById("mapDays");
+  tabs.innerHTML = ""; dayTabs.innerHTML = "";
+  if (!maps || !maps.count) { tabs.append(el("div", { className: "muted" }, "No maps yet.")); return; }
+  for (const [k, label] of [["tmax", "High temp"], ["precip", "Precipitation"]]) {
+    const b = el("button", { className: state.mapKind === k ? "on" : "" }, label);
+    b.onclick = () => { state.mapKind = k; renderMaps(maps); }; tabs.append(b);
+  }
+  state.mapDay = Math.min(state.mapDay, maps.count - 1);
+  maps.days.forEach((d, i) => {
+    const wd = new Date(d + "T12:00").toLocaleDateString([], { weekday: "short" });
+    const b = el("button", { className: state.mapDay === i ? "on" : "" }, wd);
+    b.onclick = () => { state.mapDay = i; renderMaps(maps); }; dayTabs.append(b);
+  });
+  document.getElementById("mapImg").src = `maps/${state.mapKind}_${state.mapDay}.png${bust()}`;
+}
+
+function renderModel(fc, rep) {
+  const box = document.getElementById("model"); box.innerHTML = "<h2>Model</h2>";
+  if (fc) {
+    box.append(el("div", {}, `${fc.model}, run ${new Date(fc.run).toLocaleString()} `),
+               el("div", { className: "muted", style: "font-size:13px;margin-bottom:10px" },
+                  `Processed ${ago(fc.generated)}`));
+  }
+  const names = { t2m: "Temperature", d2m: "Dew point", wspd: "Wind speed" };
+  const unit = { t2m: imp() ? "°F" : "°C", d2m: imp() ? "°F" : "°C", wspd: imp() ? "mph" : "km/h" };
+  const conv = { t2m: x => imp() ? x * 1.8 : x, d2m: x => imp() ? x * 1.8 : x, wspd: x => imp() ? x * 2.23694 : x * 3.6 };
+  box.append(el("div", { className: "muted", style: "font-size:13px" },
+    "Local correction learns GFS's errors at your station. Average error (MAE) on held-out runs:"));
+  const tbl = el("table", { className: "model" });
+  for (const k of ["t2m", "d2m", "wspd"]) {
+    const t = rep && rep.targets && rep.targets[k];
+    const tr = el("tr"); tr.append(el("td", {}, names[k]));
+    if (t && t.mae_gfs != null) {
+      tr.append(el("td", {}, `GFS ${conv[k](t.mae_gfs).toFixed(1)} → local ${conv[k](t.mae_local).toFixed(1)} ${unit[k]}`));
+    } else tr.append(el("td", {}, ""));
+    const active = fc && fc.corrected && fc.corrected.includes(k);
+    const td = el("td");
+    td.append(el("span", { className: "pill" + (active ? " ok" : "") },
+      active ? "active" : (t ? t.status : "not trained")));
+    tr.append(td);
+    tbl.append(tr);
+  }
+  box.append(tbl);
+}
+
+async function refresh() {
+  site = await getJSON("site.json");
+  if (!site) { document.getElementById("updated").textContent = "site.json missing. Run: goeswx dashboard"; return; }
+  document.title = site.name + " weather";
+  document.getElementById("title").textContent = site.name;
+  if (!state.product) state.product = site.products[0];
+  const [cur, fc, maps, rep] = await Promise.all([
+    getJSON("current.json"), getJSON("forecast.json"), getJSON("maps/index.json"), getJSON("mos_report.json")]);
+  document.getElementById("updated").textContent = "Updated " + new Date(site.generated).toLocaleTimeString();
+  if (!state.loop || !document.querySelector("#media video")) renderMedia();
+  renderCurrent(cur, fc); renderForecast(fc); renderMaps(maps); renderModel(fc, rep);
+}
+refresh();
+setInterval(refresh, 5 * 60 * 1000);
+</script>
+</body>
+</html>

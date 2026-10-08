@@ -1,0 +1,696 @@
+<title>GOES Dish Aligner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* Layout: field-instrument panel. Location strip on top, big pointing readouts, then sky plot + gauges, then signals and procedure. */
+:root {
+  --bg: #e9eef2;
+  --surface: #ffffff;
+  --ink: #13202b;
+  --muted: #566573;
+  --line: #c9d3db;
+  --accent: #0b6e80;
+  --accent-soft: #d3eaee;
+  --sun: #c27c0e;
+  --warn: #b3261e;
+  --ok: #2b7a3d;
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151b; --surface: #161f27; --ink: #e2e8ed; --muted: #8e9eab; --line: #2a3742;
+    --accent: #4cc3d6; --accent-soft: #15333a; --sun: #f0b44a; --warn: #ff8a80; --ok: #7bd389;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151b; --surface: #161f27; --ink: #e2e8ed; --muted: #8e9eab; --line: #2a3742;
+  --accent: #4cc3d6; --accent-soft: #15333a; --sun: #f0b44a; --warn: #ff8a80; --ok: #7bd389;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.5; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 20px; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; letter-spacing: .01em; text-wrap: balance; margin: 0; line-height: 1.1; }
+h1 { font-size: 2.2rem; }
+h2 { font-size: 1.45rem; }
+h3 { font-size: 1.1rem; }
+p { margin: 0; }
+.label { font-family: var(--font-display); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: .78rem; color: var(--muted); }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+a { color: var(--accent); }
+
+header.top { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+header.top .sub { color: var(--muted); max-width: 60ch; }
+.clock { font-family: var(--font-mono); font-size: .9rem; color: var(--muted); }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px; display: grid; gap: 14px; min-width: 0; align-content: start; }
+
+/* Controls */
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 14px; align-items: end; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field.wide { grid-column: span 2; }
+@media (max-width: 520px) { .field.wide { grid-column: 1 / -1; } }
+input, select, button { font: inherit; font-size: .95rem; }
+input, select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); }
+input.mono { font-family: var(--font-mono); }
+button { padding: 8px 12px; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); cursor: pointer; font-weight: 600; }
+button.ghost { background: transparent; color: var(--accent); }
+button:hover { filter: brightness(1.08); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; color: var(--ink); font-weight: 600; padding: 7px 12px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.note { font-size: .88rem; color: var(--muted); }
+.msg { font-size: .88rem; color: var(--warn); min-height: 1.2em; }
+
+/* Readouts */
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; }
+.ro { padding: 14px 16px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; gap: 2px; align-content: start; min-width: 0; }
+.ro .big { font-family: var(--font-mono); font-size: 2.1rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ro .big small { font-size: 1rem; font-weight: 400; color: var(--muted); }
+.ro .hint { font-size: .86rem; color: var(--muted); }
+.ro.key .big { color: var(--accent); }
+.banner { padding: 12px 16px; border-radius: 6px; border: 1px solid var(--warn); color: var(--warn); background: var(--surface); font-weight: 600; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .8rem; font-weight: 600; border: 1px solid currentColor; }
+.pill.ok { color: var(--ok); } .pill.warn { color: var(--warn); } .pill.mid { color: var(--sun); }
+
+/* Visuals */
+.visuals { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 820px) { .visuals { grid-template-columns: minmax(0, 1fr); } }
+.gauges { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 820px) { .gauges { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 480px) { .gauges { grid-template-columns: minmax(0, 1fr); } }
+svg { display: block; width: 100%; height: auto; max-width: 100%; }
+svg text { font-family: var(--font-mono); fill: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .85rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 18px; height: 0; vertical-align: middle; margin-right: 6px; border-top: 2px solid var(--c); }
+.legend .dash::before { border-top-style: dashed; }
+.legend .dot::before { border-top-style: dotted; border-top-width: 3px; }
+
+/* Tables */
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .06em; font-size: .78rem; color: var(--muted); font-weight: 600; }
+tr.sel td { background: var(--accent-soft); }
+tr.pick { cursor: pointer; }
+td.num { white-space: nowrap; }
+
+/* Procedure */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 820px) { .two { grid-template-columns: minmax(0, 1fr); } }
+ol.steps { margin: 0; padding-left: 1.4em; display: grid; gap: 10px; }
+ol.steps li { padding-left: 4px; }
+ol.steps b { font-family: var(--font-mono); font-weight: 600; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: .93rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.live { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.live .big { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600; }
+footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
+@media (prefers-reduced-motion: no-preference) { .ro .big { transition: color .2s; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="label" id="satEyebrow">GOES-East · GOES-19 · 75.2°W</div>
+      <h1>GOES Dish Aligner</h1>
+      <p class="sub">Pointing angles, feed rotation and downlink frequencies for your site. GOES sits still in the sky, so you aim once and you're done.</p>
+    </div>
+    <div class="clock" id="clock">UTC --:--:--</div>
+  </header>
+
+  <section class="panel" aria-labelledby="h-site">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+      <h2 id="h-site">Your site</h2>
+      <div class="seg" role="group" aria-label="Satellite">
+        <button id="sat-east" aria-pressed="true">GOES-East</button>
+        <button id="sat-west" aria-pressed="false">GOES-West</button>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="field wide">
+        <label class="label" for="preset">Quick location</label>
+        <select id="preset"></select>
+      </div>
+      <div class="field">
+        <label class="label" for="lat">Latitude (°N +)</label>
+        <input id="lat" class="mono" type="number" step="0.0001" min="-90" max="90">
+      </div>
+      <div class="field">
+        <label class="label" for="lon">Longitude (°E +, W is −)</label>
+        <input id="lon" class="mono" type="number" step="0.0001" min="-180" max="180">
+      </div>
+      <div class="field">
+        <label class="label" for="alt">Altitude (m)</label>
+        <input id="alt" class="mono" type="number" step="1" value="0">
+      </div>
+      <div class="field">
+        <label class="label" for="decl">Magnetic declination (°E +)</label>
+        <input id="decl" class="mono" type="number" step="0.1">
+      </div>
+      <div class="field">
+        <label class="label" for="dish">Dish type</label>
+        <select id="dish">
+          <option value="0">Prime focus / grid</option>
+          <option value="22.3">Offset, 22.3°</option>
+          <option value="24.6">Offset, 24.6°</option>
+          <option value="26">Offset, 26°</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="diam">Dish diameter (m)</label>
+        <input id="diam" class="mono" type="number" step="0.1" min="0.3" max="10" value="1.2">
+      </div>
+      <div class="field">
+        <button class="ghost" id="geo" type="button">Use my location</button>
+      </div>
+    </div>
+    <p class="msg" id="geoMsg" role="status"></p>
+    <p class="note">Declination converts true bearings to compass bearings. Quick locations fill in an approximate 2025 value; for your exact spot use the <a href="https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml#declination" target="_blank" rel="noopener">NOAA declination calculator</a>.</p>
+  </section>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="readouts" aria-label="Pointing solution">
+    <div class="ro key"><span class="label">Azimuth (true)</span><span class="big" id="r-az">—</span><span class="hint" id="r-az-h"></span></div>
+    <div class="ro key"><span class="label">Azimuth (compass)</span><span class="big" id="r-maz">—</span><span class="hint" id="r-maz-h"></span></div>
+    <div class="ro key"><span class="label">Elevation</span><span class="big" id="r-el">—</span><span class="hint" id="r-el-h"></span></div>
+    <div class="ro key"><span class="label">Feed rotation (skew)</span><span class="big" id="r-skew">—</span><span class="hint" id="r-skew-h"></span></div>
+    <div class="ro"><span class="label">Tune to</span><span class="big" id="r-freq">—</span><span class="hint" id="r-freq-h"></span></div>
+    <div class="ro"><span class="label">Slant range</span><span class="big" id="r-rng">—</span><span class="hint" id="r-rng-h"></span></div>
+  </section>
+
+  <section class="visuals">
+    <div class="panel">
+      <h2>Sky view</h2>
+      <svg id="sky" viewBox="0 0 360 360" role="img" aria-label="Sky plot: azimuth around the edge, elevation from horizon (edge) to overhead (centre)"></svg>
+      <div class="legend">
+        <span style="--c:var(--accent)">Your satellite</span>
+        <span class="dash" style="--c:var(--muted)">Geostationary belt</span>
+        <span class="dot" style="--c:var(--sun)">Sun's path today</span>
+        <span style="--c:var(--warn)">Magnetic north</span>
+      </div>
+      <p class="note">Edge of the circle is the horizon, centre is straight up. Anything that stands above the belt line in the satellite's direction (trees, roof lines) will block the signal.</p>
+    </div>
+    <div class="panel">
+      <h2>Mount settings</h2>
+      <div class="gauges">
+        <div><span class="label">Elevation, side view</span><svg id="elev" viewBox="0 0 200 170" role="img" aria-label="Elevation diagram"></svg></div>
+        <div><span class="label">Feed, seen from behind dish</span><svg id="skewsvg" viewBox="0 0 200 170" role="img" aria-label="Feed rotation diagram"></svg></div>
+      </div>
+      <dl class="kv" id="mount"></dl>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-freq">
+    <h2 id="h-freq">Downlink frequencies</h2>
+    <p class="note">Pick the signal you want to receive; the readouts and steps update. All GOES-R series satellites (GOES-16 to GOES-19) use the same plan.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Signal</th><th>Centre freq</th><th>Polarization</th><th>Rate / modulation</th><th>Typical dish</th><th>What you get</th></tr></thead>
+        <tbody id="freqs"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="two">
+    <div class="panel">
+      <h2>Alignment procedure</h2>
+      <ol class="steps" id="steps"></ol>
+    </div>
+    <div class="panel">
+      <h2>Aim with the sun</h2>
+      <p id="sunAlign" class="muted">Calculating…</p>
+      <h3>Sun outages</h3>
+      <p class="note">Twice a year the sun passes behind the satellite and its noise swamps the signal for a few minutes a day. With a wide L-band beam you'll see SNR dips on the days around the peak.</p>
+      <div class="tablewrap"><table><thead><tr><th>Window</th><th>Worst day</th><th>Worst time</th></tr></thead><tbody id="outages"><tr><td colspan="3" class="muted">Calculating…</td></tr></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="two">
+    <div class="panel">
+      <h2>Link figures</h2>
+      <dl class="kv" id="link"></dl>
+      <p class="note">Gain assumes 55% aperture efficiency. A wide beam is forgiving on aim but lets in more terrestrial interference, so a filtered LNA right at the feed matters.</p>
+    </div>
+    <div class="panel">
+      <h2>Phone compass</h2>
+      <p class="note">Works when this page is opened directly in a phone browser (save the file and open it). Keep the phone flat and away from the metal dish, which throws the compass off.</p>
+      <div><button type="button" id="compassBtn" class="ghost">Start live compass</button></div>
+      <div class="live">
+        <div><span class="label">Phone heading</span><div class="big" id="c-head">—</div></div>
+        <div><span class="label">Turn</span><div class="big" id="c-turn">—</div></div>
+        <div><span class="label">Phone tilt</span><div class="big" id="c-tilt">—</div></div>
+      </div>
+      <p class="msg" id="compassMsg" role="status"></p>
+    </div>
+  </section>
+
+  <footer>
+    <p>Positions: GOES-19 is GOES-East at 75.2°W (operational since April 2025); GOES-18 is GOES-West at 137.2°W. Geometry uses the WGS-84 ellipsoid and a 42,164 km geostationary radius; sun position uses the NOAA solar algorithm.</p>
+    <p>Skew is measured against the satellite's north–south axis. Treat it as a starting point and finish by rotating the feed for the best SNR.</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const D = Math.PI / 180;
+  const SATS = {
+    east: { role: "GOES-East", name: "GOES-19", lon: -75.2 },
+    west: { role: "GOES-West", name: "GOES-18", lon: -137.2 },
+  };
+  const SIGNALS = [
+    { id: "hrit", name: "HRIT/EMWIN", f: 1694.1, pol: "Linear", polType: "linear", rate: "400 kbps BPSK, ~1.2 MHz wide", dish: "0.8–1.2 m + LNA/filter", what: "Full-disk images, weather text, alerts. The usual hobby target." },
+    { id: "grb", name: "GRB", f: 1686.6, pol: "RHCP + LHCP (dual circular)", polType: "circular", rate: "31 Mbps total, DVB-S2, ~9.8 MHz wide", dish: "1.5–2.4 m, circular feed", what: "All ABI bands at full resolution, lightning (GLM), space weather." },
+    { id: "dcpr", name: "DCS report (DCPR)", f: 1679.9, pol: "Linear", polType: "linear", rate: "Low-rate PSK", dish: "1.2 m+", what: "Data relayed from remote ground platforms (river gauges, buoys)." },
+    { id: "cda", name: "CDA telemetry", f: 1693.0, pol: "Linear", polType: "linear", rate: "40 kbps", dish: "1.2 m+", what: "Spacecraft housekeeping telemetry. Useful as a strong beacon for peaking." },
+  ];
+  const PRESETS = [
+    ["Washington, DC", 38.9072, -77.0369, 20, -10.6],
+    ["New York, NY", 40.7128, -74.006, 10, -12.8],
+    ["Boston, MA", 42.3601, -71.0589, 10, -14.0],
+    ["Miami, FL", 25.7617, -80.1918, 2, -6.6],
+    ["Atlanta, GA", 33.749, -84.388, 300, -4.9],
+    ["Chicago, IL", 41.8781, -87.6298, 180, -3.4],
+    ["Houston, TX", 29.7604, -95.3698, 15, 2.0],
+    ["Dallas, TX", 32.7767, -96.797, 140, 2.7],
+    ["Denver, CO", 39.7392, -104.9903, 1610, 7.6],
+    ["Phoenix, AZ", 33.4484, -112.074, 330, 9.9],
+    ["Los Angeles, CA", 34.0522, -118.2437, 90, 11.4],
+    ["Seattle, WA", 47.6062, -122.3321, 50, 15.0],
+    ["Anchorage, AK", 61.2181, -149.9003, 30, 14.6],
+    ["Honolulu, HI", 21.3069, -157.8583, 5, 9.2],
+    ["Toronto, ON", 43.6532, -79.3832, 80, -9.8],
+    ["Mexico City", 19.4326, -99.1332, 2240, 4.5],
+    ["San Juan, PR", 18.4655, -66.1057, 5, -12.5],
+    ["Bogotá", 4.711, -74.0721, 2640, -7.4],
+    ["São Paulo", -23.5505, -46.6333, 760, -21.9],
+    ["Buenos Aires", -34.6037, -58.3816, 25, -9.6],
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const state = { sat: "east", lat: 38.9072, lon: -77.0369, alt: 20, decl: -10.6, offset: 0, diam: 1.2, signal: "hrit", preset: "0" };
+  try { Object.assign(state, JSON.parse(localStorage.getItem("goes-aligner") || "{}")); } catch (e) {}
+  const save = () => { try { localStorage.setItem("goes-aligner", JSON.stringify(state)); } catch (e) {} };
+
+  const wrap360 = (a) => ((a % 360) + 360) % 360;
+  const wrap180 = (a) => { a = wrap360(a); return a > 180 ? a - 360 : a; };
+  const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "—");
+  const compass16 = (az) => ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"][Math.round(wrap360(az) / 22.5) % 16];
+
+  // ---------- Geometry ----------
+  function siteEcef(lat, lon, hKm) {
+    const a = 6378.137, e2 = 0.00669437999014;
+    const p = lat * D, l = lon * D, N = a / Math.sqrt(1 - e2 * Math.sin(p) ** 2);
+    return [(N + hKm) * Math.cos(p) * Math.cos(l), (N + hKm) * Math.cos(p) * Math.sin(l), (N * (1 - e2) + hKm) * Math.sin(p)];
+  }
+  function lookAngles(lat, lon, hKm, satLon) {
+    const R = 42164.17;
+    const p = lat * D, l = lon * D;
+    const s = siteEcef(lat, lon, hKm);
+    const t = [R * Math.cos(satLon * D), R * Math.sin(satLon * D), 0];
+    const d = [t[0] - s[0], t[1] - s[1], t[2] - s[2]];
+    const E = -Math.sin(l) * d[0] + Math.cos(l) * d[1];
+    const N = -Math.sin(p) * Math.cos(l) * d[0] - Math.sin(p) * Math.sin(l) * d[1] + Math.cos(p) * d[2];
+    const U = Math.cos(p) * Math.cos(l) * d[0] + Math.cos(p) * Math.sin(l) * d[1] + Math.sin(p) * d[2];
+    const rng = Math.hypot(d[0], d[1], d[2]);
+    const los = d.map((v) => v / rng);
+    const up = [Math.cos(p) * Math.cos(l), Math.cos(p) * Math.sin(l), Math.sin(p)];
+    const proj = (v) => { const k = v[0] * los[0] + v[1] * los[1] + v[2] * los[2]; return v.map((x, i) => x - k * los[i]); };
+    const pu = proj(up), pz = proj([0, 0, 1]);
+    const cr = [pu[1] * pz[2] - pu[2] * pz[1], pu[2] * pz[0] - pu[0] * pz[2], pu[0] * pz[1] - pu[1] * pz[0]];
+    // Positive = clockwise as seen from behind the dish looking at the satellite.
+    let skew = Math.atan2(cr[0] * los[0] + cr[1] * los[1] + cr[2] * los[2], pu[0] * pz[0] + pu[1] * pz[1] + pu[2] * pz[2]) / D;
+    if (skew > 90) skew -= 180; else if (skew <= -90) skew += 180; // linear pol repeats every 180°
+    return { az: wrap360(Math.atan2(E, N) / D), el: Math.atan2(U, Math.hypot(E, N)) / D, rng, skew };
+  }
+
+  // ---------- Sun (NOAA algorithm) ----------
+  function sunAzEl(ms, lat, lon) {
+    const jd = ms / 86400000 + 2440587.5, n = jd - 2451545, T = n / 36525;
+    const L0 = wrap360(280.46646 + T * (36000.76983 + T * 0.0003032));
+    const M = (357.52911 + T * (35999.05029 - 0.0001537 * T)) * D;
+    const C = Math.sin(M) * (1.914602 - T * (0.004817 + 0.000014 * T)) + Math.sin(2 * M) * (0.019993 - 0.000101 * T) + Math.sin(3 * M) * 0.000289;
+    const om = (125.04 - 1934.136 * T) * D;
+    const lam = (L0 + C - 0.00569 - 0.00478 * Math.sin(om)) * D;
+    const eps = (23 + (26 + (21.448 - T * (46.815 + T * (0.00059 - T * 0.001813))) / 60) / 60 + 0.00256 * Math.cos(om)) * D;
+    const dec = Math.asin(Math.sin(eps) * Math.sin(lam));
+    const ra = Math.atan2(Math.cos(eps) * Math.sin(lam), Math.cos(lam));
+    const gmst = wrap360(280.46061837 + 360.98564736629 * n + 0.000387933 * T * T);
+    const H = (gmst + lon) * D - ra, p = lat * D;
+    const el = Math.asin(Math.sin(p) * Math.sin(dec) + Math.cos(p) * Math.cos(dec) * Math.cos(H));
+    const az = Math.atan2(-Math.cos(dec) * Math.sin(H), Math.sin(dec) * Math.cos(p) - Math.cos(dec) * Math.cos(H) * Math.sin(p));
+    return { az: wrap360(az / D), el: el / D };
+  }
+  const enu = (az, el) => [Math.cos(el * D) * Math.sin(az * D), Math.cos(el * D) * Math.cos(az * D), Math.sin(el * D)];
+  const sep = (a, b) => Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) / D;
+
+  const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+  const dayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+  const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+
+  // ---------- Rendering ----------
+  function sigFor() { return SIGNALS.find((s) => s.id === state.signal) || SIGNALS[0]; }
+
+  function render() {
+    const sat = SATS[state.sat];
+    $("sat-east").setAttribute("aria-pressed", state.sat === "east");
+    $("sat-west").setAttribute("aria-pressed", state.sat === "west");
+    $("satEyebrow").textContent = `${sat.role} · ${sat.name} · ${Math.abs(sat.lon)}°W`;
+
+    const valid = Number.isFinite(state.lat) && Number.isFinite(state.lon) && Math.abs(state.lat) <= 90 && Math.abs(state.lon) <= 180;
+    if (!valid) { $("banner").hidden = false; $("banner").textContent = "Enter a latitude between −90 and 90 and a longitude between −180 and 180."; return; }
+
+    const L = lookAngles(state.lat, state.lon, (state.alt || 0) / 1000, sat.lon);
+    const sig = sigFor();
+    const maz = wrap360(L.az - (state.decl || 0));
+    const visible = L.el > 0;
+    const banner = $("banner");
+    if (!visible) { banner.hidden = false; banner.textContent = `${sat.name} is ${fmt(-L.el)}° below your horizon. It can't be received from this location.`; }
+    else if (L.el < 5) { banner.hidden = false; banner.textContent = `${sat.name} is only ${fmt(L.el)}° above the horizon. You need a completely clear view low in that direction, and signal will be weak and prone to fading.`; }
+    else banner.hidden = true;
+
+    $("r-az").innerHTML = `${fmt(L.az)}<small>°</small>`;
+    $("r-az-h").textContent = `${compass16(L.az)}, measured from true north`;
+    $("r-maz").innerHTML = `${fmt(maz)}<small>°</small>`;
+    $("r-maz-h").textContent = `what a compass reads (declination ${fmt(state.decl)}°)`;
+    $("r-el").innerHTML = `${fmt(L.el)}<small>°</small>`;
+    $("r-el-h").innerHTML = visible ? `above the horizon ${L.el >= 20 ? '<span class="pill ok">good</span>' : L.el >= 10 ? '<span class="pill mid">low</span>' : '<span class="pill warn">very low</span>'}` : '<span class="pill warn">below horizon</span>';
+    const skewDir = Math.abs(L.skew) < 0.5 ? "no rotation needed" : L.skew > 0 ? "clockwise" : "counter-clockwise";
+    if (sig.polType === "circular") {
+      $("r-skew").innerHTML = `n/a`;
+      $("r-skew-h").textContent = `${sig.name} is circular; feed rotation doesn't matter (linear would be ${fmt(Math.abs(L.skew))}° ${skewDir})`;
+    } else {
+      $("r-skew").innerHTML = `${fmt(Math.abs(L.skew))}<small>° ${Math.abs(L.skew) < 0.5 ? "" : L.skew > 0 ? "CW" : "CCW"}</small>`;
+      $("r-skew-h").textContent = `${skewDir}, looking from behind the dish`;
+    }
+    $("r-freq").innerHTML = `${sig.f.toFixed(1)}<small> MHz</small>`;
+    $("r-freq-h").textContent = `${sig.name}, ${sig.pol.toLowerCase()}`;
+    $("r-rng").innerHTML = `${Math.round(L.rng).toLocaleString()}<small> km</small>`;
+    $("r-rng-h").textContent = `one-way delay ${fmt(L.rng / 299.792458, 1)} ms`;
+
+    renderMount(L, sig);
+    renderSky(L, sat);
+    renderElev(L);
+    renderSkew(L, sig);
+    renderFreqs(sig);
+    renderSteps(L, maz, sig, sat);
+    renderLink(L, sig);
+    renderSunAlign(L);
+    scheduleOutages(L);
+    compassTarget = maz;
+    save();
+  }
+
+  function renderMount(L, sig) {
+    const off = Number(state.offset) || 0;
+    const mountEl = L.el - off;
+    const rimFromVertical = L.el - off;
+    $("mount").innerHTML = `
+      <dt>Elevation scale setting</dt><dd>${fmt(mountEl)}°${off ? ` (${fmt(L.el)}° look − ${off}° offset)` : ""}</dd>
+      <dt>Inclinometer on dish rim</dt><dd>${fmt(rimFromVertical)}° back from vertical</dd>
+      <dt>Compass bearing</dt><dd>${fmt(wrap360(L.az - (state.decl || 0)))}° magnetic</dd>
+      <dt>Feed rotation</dt><dd>${sig.polType === "circular" ? "not needed (circular)" : `${fmt(Math.abs(L.skew))}° ${L.skew > 0 ? "CW" : "CCW"}`}</dd>`;
+  }
+
+  function polar(az, el, cx, cy, r) {
+    const rr = r * (90 - Math.max(el, 0)) / 90;
+    return [cx + rr * Math.sin(az * D), cy - rr * Math.cos(az * D)];
+  }
+
+  function renderSky(L, sat) {
+    const cx = 180, cy = 180, r = 140;
+    let s = "";
+    for (const e of [0, 30, 60]) s += `<circle cx="${cx}" cy="${cy}" r="${r * (90 - e) / 90}" fill="none" stroke="var(--line)" stroke-width="${e === 0 ? 1.5 : 1}"/>`;
+    for (const e of [30, 60]) s += `<text x="${cx + 3}" y="${cy - r * (90 - e) / 90 + 11}" font-size="9">${e}°</text>`;
+    for (let a = 0; a < 360; a += 10) {
+      const major = a % 30 === 0;
+      const [x1, y1] = polar(a, 0, cx, cy, r), [x2, y2] = polar(a, major ? 6 : 3, cx, cy, r);
+      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--muted)" stroke-width="1"/>`;
+    }
+    const lab = { 0: "N", 90: "E", 180: "S", 270: "W" };
+    for (const a of [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]) {
+      const rr = r + 16, x = cx + rr * Math.sin(a * D), y = cy - rr * Math.cos(a * D) + 4;
+      s += `<text x="${x}" y="${y}" text-anchor="middle" font-size="${lab[a] ? 13 : 9}" ${lab[a] ? 'style="fill:var(--ink);font-weight:600"' : ""}>${lab[a] || a}</text>`;
+    }
+    // Magnetic north
+    const mn = wrap360(state.decl || 0);
+    { const [x1, y1] = polar(mn, 0, cx, cy, r), [x2, y2] = polar(mn, 14, cx, cy, r);
+      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--warn)" stroke-width="2"/>`; }
+    // Geostationary belt
+    let pts = [];
+    for (let d = -85; d <= 85; d += 1) {
+      const g = lookAngles(state.lat, state.lon, 0, state.lon + d);
+      if (g.el >= 0) pts.push(polar(g.az, g.el, cx, cy, r));
+    }
+    if (pts.length > 1) s += `<polyline points="${pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+    // Sun path today
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    let seg = [], segs = [];
+    for (let m = 0; m <= 1440; m += 10) {
+      const sp = sunAzEl(start.getTime() + m * 60000, state.lat, state.lon);
+      if (sp.el > 0) seg.push(polar(sp.az, sp.el, cx, cy, r)); else if (seg.length) { segs.push(seg); seg = []; }
+    }
+    if (seg.length) segs.push(seg);
+    for (const sg of segs) s += `<polyline points="${sg.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="var(--sun)" stroke-width="2.5" stroke-dasharray="1 5" stroke-linecap="round"/>`;
+    const now = sunAzEl(Date.now(), state.lat, state.lon);
+    if (now.el > 0) { const [x, y] = polar(now.az, now.el, cx, cy, r); s += `<circle cx="${x}" cy="${y}" r="6" fill="var(--sun)"/>`; }
+    // Satellite line of sight
+    if (L.el > 0) {
+      const [x, y] = polar(L.az, L.el, cx, cy, r);
+      s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--accent)" stroke-width="2"/>`;
+      s += `<circle cx="${x}" cy="${y}" r="7" fill="var(--surface)" stroke="var(--accent)" stroke-width="3"/>`;
+      const tx = x + (x > cx ? -10 : 10), anchor = x > cx ? "end" : "start";
+      s += `<text x="${tx}" y="${y - 12}" text-anchor="${anchor}" font-size="11" style="fill:var(--accent);font-weight:600">${sat.name}</text>`;
+    } else {
+      const [x, y] = polar(L.az, 0, cx, cy, r);
+      s += `<circle cx="${x}" cy="${y}" r="6" fill="none" stroke="var(--warn)" stroke-width="2" stroke-dasharray="2 2"/>`;
+    }
+    s += `<circle cx="${cx}" cy="${cy}" r="2.5" fill="var(--muted)"/>`;
+    $("sky").innerHTML = s;
+  }
+
+  function renderElev(L) {
+    const el = Math.max(L.el, 0), ox = 40, oy = 140, r = 110;
+    let s = `<line x1="10" y1="${oy}" x2="190" y2="${oy}" stroke="var(--muted)" stroke-width="1.5"/>`;
+    s += `<path d="M ${ox + 40} ${oy} A 40 40 0 0 0 ${ox + 40 * Math.cos(el * D)} ${oy - 40 * Math.sin(el * D)}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+    s += `<line x1="${ox}" y1="${oy}" x2="${ox + r * Math.cos(el * D)}" y2="${oy - r * Math.sin(el * D)}" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="6 4"/>`;
+    // Dish face perpendicular to the beam
+    const px = -Math.sin(el * D), py = -Math.cos(el * D);
+    s += `<line x1="${ox + 22 * px}" y1="${oy + 22 * py}" x2="${ox - 22 * px}" y2="${oy - 22 * py}" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>`;
+    s += `<text x="${ox + 48}" y="${oy - 8}" font-size="12" style="fill:var(--accent);font-weight:600">${fmt(L.el)}°</text>`;
+    s += `<text x="190" y="${oy + 18}" text-anchor="end" font-size="10">horizon → ${compass16(L.az)}</text>`;
+    $("elev").innerHTML = s;
+  }
+
+  function renderSkew(L, sig) {
+    const cx = 100, cy = 82, r = 58, a = sig.polType === "circular" ? 0 : L.skew;
+    let s = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="2"/>`;
+    s += `<line x1="${cx}" y1="${cy - r - 8}" x2="${cx}" y2="${cy + r + 8}" stroke="var(--muted)" stroke-dasharray="3 3"/>`;
+    s += `<text x="${cx}" y="${cy - r - 12}" text-anchor="middle" font-size="9">up</text>`;
+    const dx = Math.sin(a * D) * (r - 8), dy = -Math.cos(a * D) * (r - 8);
+    s += `<line x1="${cx - dx}" y1="${cy - dy}" x2="${cx + dx}" y2="${cy + dy}" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>`;
+    if (sig.polType !== "circular" && Math.abs(a) >= 0.5) {
+      const ar = r + 2, sweep = a > 0 ? 1 : 0;
+      const ex = cx + Math.sin(a * D) * ar, ey = cy - Math.cos(a * D) * ar;
+      s += `<path d="M ${cx} ${cy - ar} A ${ar} ${ar} 0 0 ${sweep} ${ex} ${ey}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+    }
+    const lbl = sig.polType === "circular" ? "circular: any angle" : `${fmt(Math.abs(a))}° ${Math.abs(a) < 0.5 ? "" : a > 0 ? "clockwise" : "counter-clockwise"}`;
+    s += `<text x="${cx}" y="${cy + r + 24}" text-anchor="middle" font-size="11" style="fill:var(--ink)">${lbl}</text>`;
+    $("skewsvg").innerHTML = s;
+  }
+
+  function renderFreqs(sel) {
+    $("freqs").innerHTML = SIGNALS.map((s) => `
+      <tr class="pick ${s.id === sel.id ? "sel" : ""}" data-id="${s.id}" tabindex="0" aria-selected="${s.id === sel.id}">
+        <td><b>${s.name}</b></td><td class="num mono">${s.f.toFixed(1)} MHz</td><td>${s.pol}</td><td>${s.rate}</td><td>${s.dish}</td><td>${s.what}</td>
+      </tr>`).join("") + `<tr><td><b>Raw instrument data</b></td><td class="num mono">8220 MHz</td><td>—</td><td>X-band</td><td>Large station</td><td class="muted">Sent to NOAA ground stations; not practical for home reception.</td></tr>`;
+    document.querySelectorAll("#freqs tr.pick").forEach((tr) => {
+      const pick = () => { state.signal = tr.dataset.id; render(); };
+      tr.addEventListener("click", pick);
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    });
+  }
+
+  function renderSteps(L, maz, sig, sat) {
+    if (L.el <= 0) { $("steps").innerHTML = `<li>${sat.name} isn't visible from here. Try the other GOES satellite with the switch above.</li>`; return; }
+    const off = Number(state.offset) || 0;
+    const items = [
+      `Mount the pole and check it is <b>plumb</b> with a level on two sides. Every degree of lean turns into pointing error.`,
+      `Set the elevation scale to <b>${fmt(L.el - off)}°</b>${off ? ` (offset dish: ${fmt(L.el)}° look angle minus ${off}°)` : ""}, or put an inclinometer on the rim and tilt the face to <b>${fmt(L.el - off)}°</b> back from vertical.`,
+      `Stand behind the dish, away from metal, and sight along a compass bearing of <b>${fmt(maz)}°</b> magnetic (${fmt(L.az)}° true, ${compass16(L.az)}). Pick a landmark on that line and point the dish at it.`,
+      sig.polType === "circular"
+        ? `Fit a <b>${sig.id === "grb" ? "RHCP or LHCP" : "circular"}</b> feed. GRB carries different data on each hand; feed rotation doesn't matter.`
+        : `Rotate the feed <b>${fmt(Math.abs(L.skew))}° ${L.skew > 0 ? "clockwise" : "counter-clockwise"}</b> as seen from behind the dish.`,
+      `Tune your SDR to <b>${sig.f.toFixed(1)} MHz</b> with the LNA/filter powered at the feed. You should see a bump in the waterfall before you get a lock.`,
+      `Sweep the azimuth slowly, a degree at a time, then peak the elevation. Move, wait a few seconds for the reading, move again.`,
+      sig.polType === "circular" ? `Tighten everything and confirm the lock holds after the bolts are snug.` : `Once locked, rotate the feed a few degrees each way and leave it where SNR is highest. Then tighten everything and recheck.`,
+    ];
+    $("steps").innerHTML = items.map((t) => `<li>${t}</li>`).join("");
+  }
+
+  function renderLink(L, sig) {
+    const lam = 299.792458 / sig.f; // metres
+    const Dm = Number(state.diam) || 1.2;
+    const gain = 10 * Math.log10(0.55 * (Math.PI * Dm / lam) ** 2);
+    const bw = 70 * lam / Dm;
+    const fspl = 20 * Math.log10(L.rng) + 20 * Math.log10(sig.f) + 32.44;
+    $("link").innerHTML = `
+      <dt>Wavelength</dt><dd>${fmt(lam * 100, 1)} cm</dd>
+      <dt>Dish gain (${fmt(Dm, 1)} m)</dt><dd>${fmt(gain, 1)} dBi</dd>
+      <dt>Beamwidth (−3 dB)</dt><dd>${fmt(bw, 1)}°</dd>
+      <dt>Aim tolerance (−1 dB)</dt><dd>±${fmt(bw * 0.29, 1)}°</dd>
+      <dt>Free-space path loss</dt><dd>${fmt(fspl, 1)} dB</dd>`;
+  }
+
+  function renderSunAlign(L) {
+    if (L.el <= 0) { $("sunAlign").textContent = "Not applicable: the satellite is below the horizon."; return; }
+    const find = (dayOffset) => {
+      const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() + dayOffset);
+      let prev = null;
+      for (let m = 0; m <= 1440; m += 1) {
+        const t = start.getTime() + m * 60000, sp = sunAzEl(t, state.lat, state.lon), diff = wrap180(sp.az - L.az);
+        if (prev && sp.el > 2 && Math.sign(diff) !== Math.sign(prev.diff) && Math.abs(diff - prev.diff) < 20) {
+          const f = prev.diff / (prev.diff - diff), when = prev.t + f * 60000;
+          return { when, el: sunAzEl(when, state.lat, state.lon).el };
+        }
+        prev = { t, diff };
+      }
+      return null;
+    };
+    let r = find(0), label = "Today";
+    if (r && r.when < Date.now()) { r = find(1) || r; label = "Tomorrow"; }
+    if (!r) { $("sunAlign").textContent = "The sun doesn't pass through the satellite's azimuth while it's up today. Use a compass or a landmark instead."; return; }
+    const back = wrap360(L.az + 180);
+    $("sunAlign").innerHTML = `${label} at <b class="mono">${timeFmt.format(new Date(r.when))}</b> (${tzName}) the sun is exactly at the dish's azimuth, ${fmt(r.el)}° up. At that moment the shadow of a vertical pole points <b class="mono">${fmt(back)}°</b>, directly away from the satellite. Mark the shadow line on the ground; the dish faces back along it. No compass, no declination error.`;
+  }
+
+  let outageTimer = null;
+  function scheduleOutages(L) {
+    clearTimeout(outageTimer);
+    $("outages").innerHTML = `<tr><td colspan="3" class="muted">Calculating…</td></tr>`;
+    if (L.el <= 0) { $("outages").innerHTML = `<tr><td colspan="3" class="muted">Not applicable.</td></tr>`; return; }
+    outageTimer = setTimeout(() => computeOutages(L), 30);
+  }
+  function computeOutages(L) {
+    const lam = 299.792458 / sigFor().f, Dm = Number(state.diam) || 1.2;
+    const thr = 35 * lam / Dm + 0.27; // half beamwidth + solar radius
+    const satV = enu(L.az, L.el);
+    const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+    const days = [];
+    // Start a month back so a window already in progress is reported whole.
+    for (let d = -30; d < 366; d++) {
+      const base = day0.getTime() + d * 86400000;
+      let best = { s: 999, t: 0 };
+      for (let m = 0; m < 1440; m += 4) {
+        const t = base + m * 60000, sp = sunAzEl(t, state.lat, state.lon);
+        if (sp.el < -1) continue;
+        const sv = sep(enu(sp.az, sp.el), satV);
+        if (sv < best.s) best = { s: sv, t };
+      }
+      if (best.s < thr) {
+        for (let k = -240; k <= 240; k += 10) {
+          const t = best.t + k * 1000, sp = sunAzEl(t, state.lat, state.lon), sv = sep(enu(sp.az, sp.el), satV);
+          if (sv < best.s) best = { s: sv, t };
+        }
+      }
+      days.push({ base, ...best });
+    }
+    const events = [];
+    let cur = null;
+    for (const d of days) {
+      if (d.s < thr) { if (!cur) cur = { first: d, last: d, peak: d }; cur.last = d; if (d.s < cur.peak.s) cur.peak = d; }
+      else if (cur) { events.push(cur); cur = null; }
+    }
+    if (cur) events.push(cur);
+    const todayMs = day0.getTime();
+    events.splice(0, events.length, ...events.filter((e) => e.last.base >= todayMs).slice(0, 2));
+    $("outages").innerHTML = events.length
+      ? events.map((e) => `<tr><td>${dayFmt.format(new Date(e.first.base))} – ${dayFmt.format(new Date(e.last.base))}</td><td class="mono">${dayFmt.format(new Date(e.peak.t))}</td><td class="mono">${timeFmt.format(new Date(e.peak.t))} <span class="muted">(${fmt(e.peak.s, 1)}° off)</span></td></tr>`).join("")
+      : `<tr><td colspan="3" class="muted">No sun outages in the next 12 months for this dish size.</td></tr>`;
+  }
+
+  // ---------- Live compass (standalone browsers only) ----------
+  let compassTarget = null;
+  function onOrient(e) {
+    let h = null;
+    if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;
+    else if (e.absolute && typeof e.alpha === "number") h = wrap360(360 - e.alpha);
+    if (h == null) return;
+    $("c-head").textContent = `${fmt(h, 0)}°`;
+    if (compassTarget != null) {
+      const t = wrap180(compassTarget - h);
+      $("c-turn").textContent = Math.abs(t) < 2 ? "on target" : `${fmt(Math.abs(t), 0)}° ${t > 0 ? "right" : "left"}`;
+    }
+    if (typeof e.beta === "number") $("c-tilt").textContent = `${fmt(Math.abs(e.beta), 0)}°`;
+  }
+  $("compassBtn").addEventListener("click", async () => {
+    $("compassMsg").textContent = "";
+    try {
+      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+        const p = await DeviceOrientationEvent.requestPermission();
+        if (p !== "granted") throw new Error("denied");
+      }
+      if (typeof DeviceOrientationEvent === "undefined") throw new Error("none");
+      window.addEventListener("deviceorientationabsolute", onOrient);
+      window.addEventListener("deviceorientation", onOrient);
+      $("compassMsg").textContent = "Listening for the phone's compass… If nothing shows within a few seconds, this browser view doesn't give access to it.";
+    } catch (e) {
+      $("compassMsg").textContent = "This view can't read the phone's compass. Open the standalone HTML file in your phone's browser, or use a regular compass.";
+    }
+  });
+
+  // ---------- Inputs ----------
+  const presetSel = $("preset");
+  presetSel.innerHTML = `<option value="custom">Custom coordinates</option>` + PRESETS.map((p, i) => `<option value="${i}">${p[0]}</option>`).join("");
+  function syncInputs() {
+    $("lat").value = state.lat; $("lon").value = state.lon; $("alt").value = state.alt;
+    $("decl").value = state.decl; $("dish").value = String(state.offset); $("diam").value = state.diam;
+    presetSel.value = state.preset ?? "custom";
+  }
+  presetSel.addEventListener("change", () => {
+    state.preset = presetSel.value;
+    const p = PRESETS[Number(presetSel.value)];
+    if (p) { [, state.lat, state.lon, state.alt, state.decl] = p; }
+    syncInputs(); render();
+  });
+  for (const [id, key] of [["lat", "lat"], ["lon", "lon"], ["alt", "alt"], ["decl", "decl"], ["diam", "diam"]]) {
+    $(id).addEventListener("input", () => {
+      state[key] = parseFloat($(id).value);
+      if (key === "lat" || key === "lon") { state.preset = "custom"; presetSel.value = "custom"; }
+      render();
+    });
+  }
+  $("dish").addEventListener("change", () => { state.offset = parseFloat($("dish").value); render(); });
+  $("sat-east").addEventListener("click", () => { state.sat = "east"; render(); });
+  $("sat-west").addEventListener("click", () => { state.sat = "west"; render(); });
+  $("geo").addEventListener("click", () => {
+    $("geoMsg").textContent = "";
+    if (!navigator.geolocation) { $("geoMsg").textContent = "Location isn't available here. Enter your coordinates instead."; return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        state.lat = +pos.coords.latitude.toFixed(5); state.lon = +pos.coords.longitude.toFixed(5);
+        if (pos.coords.altitude != null) state.alt = Math.round(pos.coords.altitude);
+        state.preset = "custom"; syncInputs(); render();
+        $("geoMsg").textContent = "Location set. Enter your magnetic declination from the NOAA link below.";
+      },
+      () => { $("geoMsg").textContent = "Location isn't available in this view. Enter your coordinates, or open the standalone file in a browser."; },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
+  // Clock
+  const tick = () => { $("clock").textContent = `UTC ${new Date().toISOString().slice(11, 19)}`; };
+  tick(); setInterval(tick, 1000);
+
+  syncInputs();
+  render();
+})();
+</script>

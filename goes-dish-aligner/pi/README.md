@@ -93,15 +93,29 @@ the page served by the Pi when you want live readings.
 
 ## Start at boot
 
-The service file assumes the user `dev` and the repo cloned into that user's home folder.
-Change `User=` and the paths if yours differ, and change `--source` if you use SatDump.
+Two service files are included. Both assume the user `dev` and the repo cloned into that
+user's home folder; change `User=` and the paths if yours differ.
+
+- `goesrecv.service` runs the receiver with `/home/dev/goesrecv.conf`.
+- `goes-signal-bridge.service` runs the bridge. Change `--source` if you use SatDump.
+
+Stop any goesrecv you started by hand first, because only one program can use the SDR:
 
 ```sh
-sudo cp goes-signal-bridge.service /etc/systemd/system/
-sudo nano /etc/systemd/system/goes-signal-bridge.service
-sudo systemctl enable --now goes-signal-bridge
-systemctl status goes-signal-bridge      # check it's running
+pkill goesrecv; pkill -f goes_signal_bridge
+sudo cp goesrecv.service goes-signal-bridge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now goesrecv goes-signal-bridge
+systemctl status goesrecv goes-signal-bridge --no-pager
 ```
+
+To see goesrecv's status lines (gain, Viterbi errors, packets, drops):
+
+```sh
+journalctl -u goesrecv -f
+```
+
+After changing `goesrecv.conf`, run `sudo systemctl restart goesrecv`.
 
 ## Aligning with it
 

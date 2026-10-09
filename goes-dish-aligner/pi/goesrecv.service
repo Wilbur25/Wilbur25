@@ -1,0 +1,15 @@
+[Unit]
+Description=goesrecv (GOES HRIT receiver, goestools)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dev
+WorkingDirectory=/home/dev
+# -v -i 10 prints a status line (gain, freq, vit, rs, packets, drops) to the log every 10 s.
+ExecStart=/usr/bin/goesrecv -v -i 10 -c /home/dev/goesrecv.conf
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

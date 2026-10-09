@@ -19,8 +19,8 @@ dish → LNA/filter → SDR → Pi running goesrecv or SatDump
 Copy the whole `goes-dish-aligner` folder to the Pi. The bridge serves `../index.html`.
 
 ```sh
-git clone https://github.com/wilbur25/wilbur25.git
-cd wilbur25/goes-dish-aligner/pi
+git clone https://github.com/Wilbur25/Wilbur25.git
+cd Wilbur25/goes-dish-aligner/pi
 pip3 install pynng          # only needed for goestools
 ```
 

@@ -1,0 +1,14 @@
+[Unit]
+Description=GOES Dish Aligner live signal bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/wilbur25/goes-dish-aligner/pi
+ExecStart=/usr/bin/python3 /home/pi/wilbur25/goes-dish-aligner/pi/goes_signal_bridge.py --source goestools
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

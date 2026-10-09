@@ -112,6 +112,26 @@ ol.steps b { font-family: var(--font-mono); font-weight: 600; }
 .kv dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .live { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .live .big { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 600; }
+/* Live signal */
+.ls-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.ls-head .title { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ls-connect { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.ls-connect .field { flex: 1 1 240px; }
+.ls-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr)); gap: 16px 20px; align-items: start; }
+.ls-grid .snr { grid-row: span 2; }
+@media (max-width: 760px) { .ls-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .ls-grid .snr { grid-column: 1 / -1; grid-row: auto; } }
+.ls-grid .m { display: grid; gap: 2px; min-width: 0; }
+.ls-grid .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.35rem; font-weight: 600; }
+.ls-grid .v small { font-size: .85rem; font-weight: 400; color: var(--muted); }
+.ls-grid .s { font-size: .84rem; color: var(--muted); }
+.snr .v { font-size: 3rem; line-height: 1; color: var(--accent); }
+.meter { position: relative; height: 12px; border-radius: 6px; background: var(--accent-soft); margin-top: 8px; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 6px; background: var(--accent); }
+.meter .peak { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); left: 0; }
+.meter-scale { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: .72rem; color: var(--muted); margin-top: 3px; }
+@media (prefers-reduced-motion: no-preference) { .meter .fill, .meter .peak { transition: width .2s, left .2s; } }
+.spark-wrap { position: relative; }
+.spark-tip { position: absolute; top: 4px; padding: 3px 8px; border-radius: 4px; background: var(--ink); color: var(--surface); font-family: var(--font-mono); font-size: .78rem; pointer-events: none; white-space: nowrap; }
 footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
 @media (prefers-reduced-motion: no-preference) { .ro .big { transition: color .2s; } }
 </style>
@@ -185,6 +205,44 @@ footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
     <div class="ro key"><span class="label">Feed rotation (skew)</span><span class="big" id="r-skew">—</span><span class="hint" id="r-skew-h"></span></div>
     <div class="ro"><span class="label">Tune to</span><span class="big" id="r-freq">—</span><span class="hint" id="r-freq-h"></span></div>
     <div class="ro"><span class="label">Slant range</span><span class="big" id="r-rng">—</span><span class="hint" id="r-rng-h"></span></div>
+  </section>
+
+  <section class="panel" id="live" aria-labelledby="h-live">
+    <div class="ls-head">
+      <div class="title"><h2 id="h-live">Live signal</h2><span class="pill" id="ls-status">Not connected</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="ghost" id="ls-tone" aria-pressed="false">Tone off</button>
+        <button type="button" class="ghost" id="ls-reset">Reset best</button>
+      </div>
+    </div>
+    <div class="ls-connect">
+      <div class="field">
+        <label class="label" for="ls-url">Pi bridge address</label>
+        <input id="ls-url" class="mono" type="url" value="http://raspberrypi.local:8077" spellcheck="false">
+      </div>
+      <button type="button" id="ls-connect">Connect</button>
+    </div>
+    <p class="note" id="ls-msg">Run <span class="mono">goes_signal_bridge.py</span> on the Pi, then open <span class="mono">http://&lt;pi-address&gt;:8077</span> on your phone. This panel connects by itself there.</p>
+    <div class="ls-grid">
+      <div class="m snr">
+        <span class="label">SNR</span>
+        <span class="v" id="ls-snr">—<small> dB</small></span>
+        <div class="meter" aria-hidden="true"><div class="fill" id="ls-fill"></div><div class="peak" id="ls-peakmark"></div></div>
+        <div class="meter-scale" aria-hidden="true"><span>0</span><span>5</span><span>10</span><span>15 dB</span></div>
+      </div>
+      <div class="m"><span class="label">Best so far</span><span class="v" id="ls-best">—</span><span class="s" id="ls-delta"></span></div>
+      <div class="m"><span class="label">Error rate (Viterbi)</span><span class="v" id="ls-ber">—</span><span class="s" id="ls-vit"></span></div>
+      <div class="m"><span class="label">Reed-Solomon fixes</span><span class="v" id="ls-rs">—</span><span class="s">bytes per packet</span></div>
+      <div class="m"><span class="label">Packets</span><span class="v" id="ls-pps">—</span><span class="s" id="ls-drop"></span></div>
+      <div class="m"><span class="label">Signal power</span><span class="v" id="ls-pwr">—</span><span class="s">relative, from AGC</span></div>
+      <div class="m"><span class="label">Freq offset</span><span class="v" id="ls-freq">—</span><span class="s">carrier tracking</span></div>
+    </div>
+    <div class="spark-wrap">
+      <span class="label">SNR, last 2 minutes</span>
+      <svg id="ls-spark" viewBox="0 0 600 140" role="img" aria-label="SNR over the last two minutes"></svg>
+      <div class="spark-tip" id="ls-tip" hidden></div>
+    </div>
+    <p class="note">Rough guide for HRIT: a steady lock with SNR above about 4 dB decodes; 6 dB or more gives margin for rain. When peaking, move in small steps and wait two or three seconds each time, because the readings average over a moment.</p>
   </section>
 
   <section class="visuals">
@@ -530,7 +588,7 @@ footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
         ? `Fit a <b>${sig.id === "grb" ? "RHCP or LHCP" : "circular"}</b> feed. GRB carries different data on each hand; feed rotation doesn't matter.`
         : `Rotate the feed <b>${fmt(Math.abs(L.skew))}° ${L.skew > 0 ? "clockwise" : "counter-clockwise"}</b> as seen from behind the dish.`,
       `Tune your SDR to <b>${sig.f.toFixed(1)} MHz</b> with the LNA/filter powered at the feed. You should see a bump in the waterfall before you get a lock.`,
-      `Sweep the azimuth slowly, a degree at a time, then peak the elevation. Move, wait a few seconds for the reading, move again.`,
+      `Sweep the azimuth slowly, a degree at a time, then peak the elevation. Move, wait a few seconds for the reading, move again. With the Pi bridge running, watch <b>Live signal</b> and switch the tone on so you can hear the peak without looking.`,
       sig.polType === "circular" ? `Tighten everything and confirm the lock holds after the bolts are snug.` : `Once locked, rotate the feed a few degrees each way and leave it where SNR is highest. Then tighten everything and recheck.`,
     ];
     $("steps").innerHTML = items.map((t) => `<li>${t}</li>`).join("");
@@ -615,6 +673,139 @@ footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
     $("outages").innerHTML = events.length
       ? events.map((e) => `<tr><td>${dayFmt.format(new Date(e.first.base))} – ${dayFmt.format(new Date(e.last.base))}</td><td class="mono">${dayFmt.format(new Date(e.peak.t))}</td><td class="mono">${timeFmt.format(new Date(e.peak.t))} <span class="muted">(${fmt(e.peak.s, 1)}° off)</span></td></tr>`).join("")
       : `<tr><td colspan="3" class="muted">No sun outages in the next 12 months for this dish size.</td></tr>`;
+  }
+
+  // ---------- Live signal from the Pi bridge ----------
+  const LS = { es: null, hist: [], best: null, lastMsg: 0, audio: null, osc: null, gainNode: null, watchdog: null };
+  try { const u = localStorage.getItem("goes-bridge"); if (u) $("ls-url").value = u; } catch (e) {}
+  const lsStatus = (text, cls) => { const el = $("ls-status"); el.textContent = text; el.className = "pill " + (cls || ""); };
+  const setV = (id, html) => { $(id).innerHTML = html; };
+
+  function lsConnect(base) {
+    base = base.replace(/\/+$/, "");
+    if (LS.es) LS.es.close();
+    clearInterval(LS.watchdog);
+    LS.lastMsg = 0;
+    lsStatus("Connecting…", "mid");
+    $("ls-msg").textContent = `Connecting to ${base}…`;
+    try { LS.es = new EventSource(base + "/api/stream"); }
+    catch (e) { lsFail(base); return; }
+    LS.es.onmessage = (ev) => { LS.lastMsg = Date.now(); try { lsUpdate(JSON.parse(ev.data)); } catch (e) {} };
+    const started = Date.now();
+    LS.watchdog = setInterval(() => {
+      if (!LS.lastMsg && Date.now() - started > 5000) lsFail(base);
+      else if (LS.lastMsg && Date.now() - LS.lastMsg > 4000) { lsStatus("Bridge lost", "warn"); $("ls-msg").textContent = `No data from ${base} for a few seconds. Check the Pi is on and the bridge is still running.`; }
+    }, 1000);
+  }
+  function lsFail(base) {
+    clearInterval(LS.watchdog);
+    if (LS.es) LS.es.close();
+    lsStatus("Not connected", "warn");
+    const embedded = location.protocol === "https:" && !location.port;
+    $("ls-msg").textContent = embedded
+      ? `This page can't reach devices on your network from here. Open ${base} in your phone or laptop browser instead; the bridge serves this same page with the live panel working.`
+      : `Couldn't reach ${base}. Check the address, that the Pi is on the same network, and that goes_signal_bridge.py is running.`;
+  }
+
+  function lsUpdate(d) {
+    if (!d.connected) lsStatus("Receiver offline", "warn");
+    else if (d.lock === false) lsStatus("No lock", "warn");
+    else if (d.lock && d.drop_rate != null && d.drop_rate > 0.05) lsStatus("Locked, dropping packets", "mid");
+    else if (d.lock) lsStatus("Locked", "ok");
+    else lsStatus("Receiving", "mid");
+    $("ls-msg").textContent = d.message || "";
+
+    const snr = d.snr_db;
+    setV("ls-snr", `${snr == null ? "—" : snr.toFixed(1)}<small> dB</small>`);
+    if (snr != null) {
+      LS.hist.push({ t: Date.now(), v: snr });
+      if (LS.best == null || snr > LS.best) LS.best = snr;
+    }
+    const cut = Date.now() - 120000;
+    while (LS.hist.length && LS.hist[0].t < cut) LS.hist.shift();
+    const pct = (v) => `${Math.max(0, Math.min(100, (v / 15) * 100))}%`;
+    $("ls-fill").style.width = snr == null ? "0%" : pct(snr);
+    $("ls-peakmark").style.left = LS.best == null ? "0%" : `calc(${pct(LS.best)} - 1px)`;
+    setV("ls-best", LS.best == null ? "—" : `${LS.best.toFixed(1)}<small> dB</small>`);
+    $("ls-delta").textContent = LS.best == null || snr == null ? "" : Math.abs(LS.best - snr) < 0.3 ? "at the peak" : `${(LS.best - snr).toFixed(1)} dB below best`;
+    setV("ls-ber", d.ber == null ? "—" : `${(d.ber * 100).toFixed(2)}<small> %</small>`);
+    $("ls-vit").textContent = d.viterbi_per_packet == null ? "" : `${Math.round(d.viterbi_per_packet)} bits corrected per packet`;
+    setV("ls-rs", d.rs_errors == null ? "—" : Number(d.rs_errors).toFixed(1));
+    setV("ls-pps", d.packets_per_s == null ? "—" : `${d.packets_per_s.toFixed(0)}<small> /s</small>`);
+    $("ls-drop").textContent = d.drop_rate == null ? "" : `${(d.drop_rate * 100).toFixed(0)}% failed`;
+    setV("ls-pwr", d.power_db == null ? "—" : `${d.power_db.toFixed(1)}<small> dB</small>`);
+    setV("ls-freq", d.freq_offset_hz == null ? "—" : `${d.freq_offset_hz >= 0 ? "+" : ""}${Math.round(d.freq_offset_hz)}<small> Hz</small>`);
+    lsSpark();
+    lsTone(snr, d.lock);
+  }
+
+  function lsSpark() {
+    const svg = $("ls-spark"), W = Math.max(300, Math.round(svg.clientWidth || 600)), H = 140, L = 30, R = 8, T = 12, B = 22;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const top = Math.max(15, Math.ceil(((LS.best || 0) + 1) / 5) * 5);
+    const x = (t) => L + ((t - (Date.now() - 120000)) / 120000) * (W - L - R);
+    const y = (v) => T + (1 - v / top) * (H - T - B);
+    let s = "";
+    for (let g = 0; g <= top; g += 5) s += `<line x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${y(g) + 4}" text-anchor="end" font-size="10">${g}</text>`;
+    for (const [sec, lbl] of [[120, "−2 min"], [60, "−1 min"], [0, "now"]]) s += `<text x="${x(Date.now() - sec * 1000)}" y="${H - 6}" text-anchor="${sec === 120 ? "start" : sec === 0 ? "end" : "middle"}" font-size="10">${lbl}</text>`;
+    const h = LS.hist;
+    if (LS.best != null) s += `<line x1="${L}" x2="${W - R}" y1="${y(LS.best)}" y2="${y(LS.best)}" stroke="var(--ink)" stroke-width="1" stroke-dasharray="4 4" opacity=".6"/><text x="${W - R}" y="${y(LS.best) - 4}" text-anchor="end" font-size="10">best ${LS.best.toFixed(1)}</text>`;
+    if (h.length > 1) {
+      const pts = h.map((p) => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+      s += `<polygon points="${x(h[0].t).toFixed(1)},${y(0)} ${pts} ${x(h[h.length - 1].t).toFixed(1)},${y(0)}" fill="var(--accent)" opacity=".14"/>`;
+      s += `<polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>`;
+      const e = h[h.length - 1];
+      s += `<circle cx="${x(e.t)}" cy="${y(e.v)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>`;
+    }
+    s += `<rect id="ls-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>`;
+    if (LS.hover != null && h.length) {
+      const hx = L + LS.hover * (W - L - R), tt = Date.now() - 120000 + LS.hover * 120000;
+      let near = h[0]; for (const p of h) if (Math.abs(p.t - tt) < Math.abs(near.t - tt)) near = p;
+      s += `<line x1="${x(near.t)}" x2="${x(near.t)}" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1"/><circle cx="${x(near.t)}" cy="${y(near.v)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>`;
+      const tip = $("ls-tip"); tip.hidden = false;
+      tip.textContent = `${near.v.toFixed(1)} dB · ${Math.round((Date.now() - near.t) / 1000)} s ago`;
+      tip.style.left = `calc(${(x(near.t) / W) * 100}% - ${hx / W > 0.6 ? 150 : 0}px)`;
+    } else $("ls-tip").hidden = true;
+    $("ls-spark").innerHTML = s;
+  }
+  $("ls-spark").addEventListener("pointermove", (e) => {
+    const r = $("ls-spark").getBoundingClientRect(), W = Math.max(300, Math.round(r.width)), fx = ((e.clientX - r.left) / r.width * W - 30) / (W - 38);
+    LS.hover = fx >= 0 && fx <= 1 ? fx : null; lsSpark();
+  });
+  $("ls-spark").addEventListener("pointerleave", () => { LS.hover = null; lsSpark(); });
+
+  function lsTone(snr, lock) {
+    if (!LS.osc) return;
+    const now = LS.audio.currentTime;
+    if (snr == null) { LS.gainNode.gain.setTargetAtTime(0, now, 0.05); return; }
+    // Pitch rises with SNR: 0 dB = 220 Hz, 15 dB = 1100 Hz. Quieter when not locked.
+    LS.osc.frequency.setTargetAtTime(220 + Math.max(0, Math.min(15, snr)) * 58.7, now, 0.08);
+    LS.gainNode.gain.setTargetAtTime(lock ? 0.08 : 0.03, now, 0.05);
+  }
+  $("ls-tone").addEventListener("click", () => {
+    const btn = $("ls-tone");
+    if (LS.osc) { LS.osc.stop(); LS.audio.close(); LS.osc = null; btn.setAttribute("aria-pressed", "false"); btn.textContent = "Tone off"; return; }
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      LS.audio = new Ctx(); LS.osc = LS.audio.createOscillator(); LS.gainNode = LS.audio.createGain();
+      LS.gainNode.gain.value = 0; LS.osc.type = "sine";
+      LS.osc.connect(LS.gainNode).connect(LS.audio.destination); LS.osc.start();
+      btn.setAttribute("aria-pressed", "true"); btn.textContent = "Tone on";
+    } catch (e) { $("ls-msg").textContent = "This browser can't play the tone."; }
+  });
+  $("ls-reset").addEventListener("click", () => { LS.best = null; LS.hist = []; lsSpark(); });
+  $("ls-connect").addEventListener("click", () => {
+    const u = $("ls-url").value.trim();
+    if (!/^https?:\/\//.test(u)) { $("ls-msg").textContent = "Enter the address starting with http://, for example http://192.168.1.50:8077"; return; }
+    try { localStorage.setItem("goes-bridge", u); } catch (e) {}
+    lsConnect(u);
+  });
+  lsSpark();
+  // When the Pi bridge serves this page, connect to it automatically.
+  if (location.protocol === "http:") {
+    fetch("/api/signal").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (d && "source" in d) { $("ls-url").value = location.origin; lsConnect(location.origin); }
+    }).catch(() => {});
   }
 
   // ---------- Live compass (standalone browsers only) ----------

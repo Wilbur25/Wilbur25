@@ -148,7 +148,7 @@ class SubSocket:
 
 def run_goestools(snap, host, demod_port, decoder_port, samples_port):
     packets = collections.deque()  # (time, viterbi_bits, rs_bytes, ok)
-    state = {"peak": None, "last_decoder": 0.0, "last_demod": 0.0}
+    state = {"peak": None, "last_decoder": 0.0, "last_demod": 0.0, "last_samples": 0.0}
     plock = threading.Lock()
 
     def sub(port):
@@ -208,6 +208,7 @@ def run_goestools(snap, host, demod_port, decoder_port, samples_port):
             snr_avg = snr if snr_avg is None else 0.8 * snr_avg + 0.2 * snr
             if state["peak"] is None or snr_avg > state["peak"]:
                 state["peak"] = snr_avg
+            state["last_samples"] = time.time()
             snap.update(snr_db=round(snr_avg, 2), peak_snr_db=round(state["peak"], 2))
 
     for fn in (decoder_loop, demod_loop, samples_loop):
@@ -221,6 +222,10 @@ def run_goestools(snap, host, demod_port, decoder_port, samples_port):
                 packets.popleft()
             window = list(packets)
         connected = now - max(state["last_decoder"], state["last_demod"]) < 3
+        if now - state["last_samples"] > 3:
+            snap.update(snr_db=None)
+        if now - state["last_demod"] > 3:
+            snap.update(power_db=None, freq_offset_hz=None)
         if window:
             ok = [p for p in window if p[3]]
             vit = sum(p[1] for p in window) / len(window)
@@ -240,6 +245,9 @@ def run_goestools(snap, host, demod_port, decoder_port, samples_port):
                 connected=connected,
                 lock=False if connected else None,
                 packets_per_s=0.0 if connected else None,
+                # Clear packet figures so the page doesn't keep showing old readings.
+                ber=None, viterbi_per_packet=None, rs_errors=None,
+                drop_rate=None,
                 message="goesrecv running, no packets yet (not locked)" if connected
                 else f"Waiting for goesrecv on {host} (ports {demod_port}/{decoder_port}/{samples_port})",
             )

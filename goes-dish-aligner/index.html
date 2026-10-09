@@ -784,19 +784,23 @@ footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
     s += `<polygon points="${x(0)},${y(lo)} ${pts(db)} ${x(db.length - 1)},${y(lo)}" fill="var(--accent)" opacity=".14"/>`;
     s += `<polyline points="${pts(db)}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>`;
     svg.innerHTML = s;
-    // How far the middle of the band sits above the noise either side of it.
+    // Compare the middle of the band with a strip just outside its edges. The far edges of the
+    // chart are skipped: the SDR's own filter rolls off there, which would look like a bump.
     const bins = db.length, inBand = [], outBand = [];
     db.forEach((v, i) => {
-      const hz = (i / (bins - 1) - 0.5) * span;
+      const hz = Math.abs((i / (bins - 1) - 0.5) * span);
       if (Math.abs(i - mid) <= 2) return;
-      if (Math.abs(hz) < bw * 0.35) inBand.push(v); else if (Math.abs(hz) > bw * 0.65) outBand.push(v);
+      if (hz < bw * 0.35) inBand.push(v);
+      else if (hz > bw * 0.57 && hz < Math.min(bw * 0.7, span * 0.42)) outBand.push(v);
     });
     const avg = (a) => a.reduce((p, c) => p + c, 0) / a.length;
     if (inBand.length && outBand.length) {
       const rise = avg(inBand) - avg(outBand);
-      note.textContent = rise > 1
-        ? `Signal bump ${rise.toFixed(1)} dB above the noise. You're on the satellite; peak it.`
-        : `No bump in the shaded band yet (${rise.toFixed(1)} dB). The spike exactly in the middle is the SDR itself, not the satellite.`;
+      note.textContent = rise > 1.5
+        ? `The shaded band sits ${rise.toFixed(1)} dB above the noise just outside it. That step at the band edges is the satellite; peak it.`
+        : rise > 0.7
+        ? `Possible faint signal (${rise.toFixed(1)} dB). Look for a flat-topped step exactly at the shaded edges before trusting it.`
+        : `No signal in the shaded band (${rise.toFixed(1)} dB). The spike in the middle is the SDR itself, and the slope at the far edges is the SDR's filter.`;
     }
   }
 

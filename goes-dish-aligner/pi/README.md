@@ -21,11 +21,15 @@ Copy the whole `goes-dish-aligner` folder to the Pi. The bridge serves `../index
 ```sh
 git clone https://github.com/Wilbur25/Wilbur25.git
 cd Wilbur25/goes-dish-aligner/pi
-pip3 install pynng          # only needed for goestools
+sudo apt install -y python3-venv
+python3 -m venv ~/goes-venv            # private Python environment for the bridge
+~/goes-venv/bin/pip install pynng      # only needed for goestools
 ```
 
-On Raspberry Pi OS Bookworm, `pip3 install` may refuse to install system-wide. Use
-`pip3 install --break-system-packages pynng` or a virtualenv.
+Raspberry Pi OS blocks `pip3 install` system-wide ("externally-managed-environment"), which
+is why the bridge gets its own venv. Run it with `~/goes-venv/bin/python` as shown below.
+If installing pynng starts compiling and fails (common on 32-bit Pi OS), run
+`sudo apt install -y cmake build-essential` and try again.
 
 ## Run with goestools (goesrecv)
 
@@ -47,7 +51,7 @@ send_buffer = 2097152
 Restart goesrecv, then:
 
 ```sh
-python3 goes_signal_bridge.py --source goestools
+~/goes-venv/bin/python goes_signal_bridge.py --source goestools
 ```
 
 What each figure comes from:
@@ -72,7 +76,7 @@ satdump live goes_hrit /home/pi/goes --source rtlsdr --samplerate 2.4e6 \
 Then:
 
 ```sh
-python3 goes_signal_bridge.py --source satdump --satdump-url http://127.0.0.1:8081/api
+~/goes-venv/bin/python goes_signal_bridge.py --source satdump --satdump-url http://127.0.0.1:8081/api
 ```
 
 SatDump reports SNR, peak SNR, Viterbi BER, deframer lock and Reed-Solomon errors. It doesn't
@@ -81,7 +85,7 @@ report packet rate or AGC power, so those show as "—".
 ## Try it without hardware
 
 ```sh
-python3 goes_signal_bridge.py --source demo
+~/goes-venv/bin/python goes_signal_bridge.py --source demo
 ```
 
 ## Open it on your phone
@@ -95,10 +99,14 @@ the page served by the Pi when you want live readings.
 
 ## Start at boot
 
+The service file assumes the user `dev` and the repo cloned into that user's home folder.
+Change `User=` and the paths if yours differ, and change `--source` if you use SatDump.
+
 ```sh
 sudo cp goes-signal-bridge.service /etc/systemd/system/
-sudo nano /etc/systemd/system/goes-signal-bridge.service   # check the path, user and --source
+sudo nano /etc/systemd/system/goes-signal-bridge.service
 sudo systemctl enable --now goes-signal-bridge
+systemctl status goes-signal-bridge      # check it's running
 ```
 
 ## Aligning with it

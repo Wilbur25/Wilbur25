@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 User=dev
 WorkingDirectory=/home/dev/Wilbur25/goes-dish-aligner/pi
-ExecStart=/home/dev/goes-venv/bin/python /home/dev/Wilbur25/goes-dish-aligner/pi/goes_signal_bridge.py --source goestools
+ExecStart=/usr/bin/python3 /home/dev/Wilbur25/goes-dish-aligner/pi/goes_signal_bridge.py --source goestools
 Restart=always
 RestartSec=5
 

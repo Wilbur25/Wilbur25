@@ -8,7 +8,7 @@ Runs on the Raspberry Pi next to your receiver software and serves:
   /api/stream       the same snapshot pushed ~4 times a second (Server-Sent Events)
 
 Sources:
-  goestools  reads goesrecv's nanomsg publishers (needs `pip install pynng`)
+  goestools  reads goesrecv's nanomsg publishers (no extra packages needed)
   satdump    polls SatDump's HTTP API (start SatDump with --http_server 0.0.0.0:8081)
   demo       synthetic signal that rises and falls, for trying the page without hardware
 
@@ -25,6 +25,8 @@ import json
 import math
 import os
 import random
+import socket
+import struct
 import threading
 import time
 import urllib.request
@@ -85,36 +87,79 @@ def m2m4_snr_db(iq):
     return max(0.0, 10 * math.log10(s / n))
 
 
-def run_goestools(snap, host, demod_port, decoder_port, samples_port):
-    try:
-        import pynng
-    except ImportError as e:
-        import sys
-        if isinstance(e, ModuleNotFoundError) and e.name == "pynng":
-            msg = (f"pynng isn't available to {sys.executable}. Start the bridge with "
-                   "~/goes-venv/bin/python, or install it there: ~/goes-venv/bin/pip install pynng")
-        else:
-            msg = f"pynng is installed but failed to load: {e}"
-        print(msg)
-        snap.update(message=msg)
-        return
+class Timeout(Exception):
+    pass
 
+
+class SubSocket:
+    """Minimal nanomsg SUB client over TCP (the SP protocol), so no extra packages are needed.
+
+    Both ends send an 8-byte header (0x00 'S' 'P' 0x00, protocol id, two reserved bytes),
+    then each message is an 8-byte big-endian length followed by the body. nanomsg filters
+    subscriptions on the SUB side, so a subscribe-to-everything client reads every message.
+    Reconnects by itself when goesrecv starts or restarts.
+    """
+
+    HEADER_SUB = b"\x00SP\x00" + struct.pack(">HH", 0x21, 0)
+    PROTO_PUB = 0x20
+
+    def __init__(self, host, port, timeout=1.5):
+        self.addr, self.timeout, self.sock = (host, port), timeout, None
+
+    def _connect(self):
+        s = socket.create_connection(self.addr, timeout=self.timeout)
+        s.sendall(self.HEADER_SUB)
+        hdr = self._read(s, 8)
+        if hdr[:4] != b"\x00SP\x00" or struct.unpack(">H", hdr[4:6])[0] != self.PROTO_PUB:
+            s.close()
+            raise ConnectionError(f"port {self.addr[1]} isn't a nanomsg publisher")
+        self.sock = s
+
+    @staticmethod
+    def _read(s, n):
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = s.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("closed")
+            buf += chunk
+        return bytes(buf)
+
+    def recv(self):
+        try:
+            if self.sock is None:
+                self._connect()
+            n = struct.unpack(">Q", self._read(self.sock, 8))[0]
+            if n > 64 * 1024 * 1024:
+                raise ConnectionError("bad message length")
+            return self._read(self.sock, n)
+        except socket.timeout:
+            # A timeout may land mid-message; start a fresh connection so framing stays in step.
+            self.sock.close() if self.sock is not None else None
+            self.sock = None
+            raise Timeout()
+        except OSError:
+            if self.sock is not None:
+                self.sock.close()
+            self.sock = None
+            time.sleep(1)  # goesrecv isn't up yet, or it restarted
+            raise Timeout()
+
+
+def run_goestools(snap, host, demod_port, decoder_port, samples_port):
     packets = collections.deque()  # (time, viterbi_bits, rs_bytes, ok)
     state = {"peak": None, "last_decoder": 0.0, "last_demod": 0.0}
     plock = threading.Lock()
 
     def sub(port):
-        s = pynng.Sub0(recv_timeout=1500)
-        s.subscribe(b"")
-        s.dial(f"tcp://{host}:{port}", block=False)  # keeps retrying until goesrecv is up
-        return s
+        return SubSocket(host, port)
 
     def decoder_loop():
         s = sub(decoder_port)
         while True:
             try:
                 msg = json.loads(s.recv().decode())
-            except pynng.Timeout:
+            except Timeout:
                 continue
             except (ValueError, UnicodeDecodeError):
                 continue
@@ -128,7 +173,7 @@ def run_goestools(snap, host, demod_port, decoder_port, samples_port):
         while True:
             try:
                 msg = json.loads(s.recv().decode())
-            except pynng.Timeout:
+            except Timeout:
                 continue
             except (ValueError, UnicodeDecodeError):
                 continue
@@ -146,7 +191,7 @@ def run_goestools(snap, host, demod_port, decoder_port, samples_port):
         while True:
             try:
                 raw = s.recv()
-            except pynng.Timeout:
+            except Timeout:
                 continue
             # goesrecv sends hundreds of blocks a second; measuring four a second is plenty
             # and keeps the Pi's CPU free for decoding.

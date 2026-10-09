@@ -21,15 +21,9 @@ Copy the whole `goes-dish-aligner` folder to the Pi. The bridge serves `../index
 ```sh
 git clone https://github.com/Wilbur25/Wilbur25.git
 cd Wilbur25/goes-dish-aligner/pi
-sudo apt install -y python3-venv
-python3 -m venv ~/goes-venv            # private Python environment for the bridge
-~/goes-venv/bin/pip install pynng      # only needed for goestools
 ```
 
-Raspberry Pi OS blocks `pip3 install` system-wide ("externally-managed-environment"), which
-is why the bridge gets its own venv. Run it with `~/goes-venv/bin/python` as shown below.
-If installing pynng starts compiling and fails (common on 32-bit Pi OS), run
-`sudo apt install -y cmake build-essential` and try again.
+It only uses Python's standard library, so there's nothing else to install.
 
 ## Run with goestools (goesrecv)
 
@@ -51,7 +45,7 @@ send_buffer = 2097152
 Restart goesrecv, then:
 
 ```sh
-~/goes-venv/bin/python goes_signal_bridge.py --source goestools
+python3 goes_signal_bridge.py --source goestools
 ```
 
 What each figure comes from:
@@ -76,7 +70,7 @@ satdump live goes_hrit /home/pi/goes --source rtlsdr --samplerate 2.4e6 \
 Then:
 
 ```sh
-~/goes-venv/bin/python goes_signal_bridge.py --source satdump --satdump-url http://127.0.0.1:8081/api
+python3 goes_signal_bridge.py --source satdump --satdump-url http://127.0.0.1:8081/api
 ```
 
 SatDump reports SNR, peak SNR, Viterbi BER, deframer lock and Reed-Solomon errors. It doesn't
@@ -85,7 +79,7 @@ report packet rate or AGC power, so those show as "—".
 ## Try it without hardware
 
 ```sh
-~/goes-venv/bin/python goes_signal_bridge.py --source demo
+python3 goes_signal_bridge.py --source demo
 ```
 
 ## Open it on your phone

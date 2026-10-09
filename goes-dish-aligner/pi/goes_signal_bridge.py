@@ -56,6 +56,8 @@ class Snapshot:
             "drop_rate": None,
             "power_db": None,
             "freq_offset_hz": None,
+            "spectrum_db": None,
+            "spectrum_span_hz": None,
             "message": "Starting…",
         }
 
@@ -146,7 +148,51 @@ class SubSocket:
             raise Timeout()
 
 
-def run_goestools(snap, host, demod_port, decoder_port, samples_port):
+def _fft(x):
+    """In-place iterative radix-2 FFT on a list of complex numbers (len a power of 2)."""
+    n = len(x)
+    j = 0
+    for i in range(1, n):
+        bit = n >> 1
+        while j & bit:
+            j ^= bit
+            bit >>= 1
+        j |= bit
+        if i < j:
+            x[i], x[j] = x[j], x[i]
+    size = 2
+    while size <= n:
+        w = complex(math.cos(-2 * math.pi / size), math.sin(-2 * math.pi / size))
+        half = size // 2
+        for start in range(0, n, size):
+            wk = 1 + 0j
+            for k in range(start, start + half):
+                t = wk * x[k + half]
+                x[k + half] = x[k] - t
+                x[k] = x[k] + t
+                wk *= w
+        size <<= 1
+    return x
+
+
+def spectrum_db(raw, n=256, frames=8):
+    """Averaged power spectrum (dB, DC centred) of interleaved int8 I/Q bytes."""
+    v = array.array("b", raw[: 2 * n * frames])
+    frames = len(v) // (2 * n)
+    if frames == 0:
+        return None
+    win = [0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1)) for i in range(n)]
+    acc = [0.0] * n
+    for f in range(frames):
+        o = 2 * n * f
+        x = [complex(v[o + 2 * i], v[o + 2 * i + 1]) * win[i] for i in range(n)]
+        for k, z in enumerate(_fft(x)):
+            acc[k] += z.real * z.real + z.imag * z.imag
+    db = [10 * math.log10(a / frames + 1e-9) for a in acc]
+    return db[n // 2:] + db[: n // 2]
+
+
+def run_goestools(snap, host, demod_port, decoder_port, samples_port, spectrum_port=None, sample_rate=None):
     packets = collections.deque()  # (time, viterbi_bits, rs_bytes, ok)
     state = {"peak": None, "last_decoder": 0.0, "last_demod": 0.0, "last_samples": 0.0}
     plock = threading.Lock()
@@ -211,7 +257,32 @@ def run_goestools(snap, host, demod_port, decoder_port, samples_port):
             state["last_samples"] = time.time()
             snap.update(snr_db=round(snr_avg, 2), peak_snr_db=round(state["peak"], 2))
 
-    for fn in (decoder_loop, demod_loop, samples_loop):
+    def spectrum_loop():
+        # Raw SDR samples (goesrecv's [rtlsdr.sample_publisher]); several MB/s, so read it all
+        # but only compute a spectrum twice a second.
+        s = sub(spectrum_port)
+        avg, last = None, 0.0
+        while True:
+            try:
+                raw = s.recv()
+            except Timeout:
+                if time.time() - last > 3:
+                    snap.update(spectrum_db=None)
+                continue
+            now = time.time()
+            if now - last < 0.5:
+                continue
+            last = now
+            db = spectrum_db(raw)
+            if db is None:
+                continue
+            avg = db if avg is None or len(avg) != len(db) else [0.6 * a + 0.4 * b for a, b in zip(avg, db)]
+            snap.update(spectrum_db=[round(d, 1) for d in avg], spectrum_span_hz=sample_rate)
+
+    loops = [decoder_loop, demod_loop, samples_loop]
+    if spectrum_port:
+        loops.append(spectrum_loop)
+    for fn in loops:
         threading.Thread(target=fn, daemon=True).start()
 
     while True:
@@ -318,6 +389,10 @@ def run_demo(snap):
             drop_rate=round(max(0.0, (5.5 - snr) / 2), 3) if lock else 1.0,
             power_db=round(-38 + snr * 0.8 + random.gauss(0, 0.15), 2),
             freq_offset_hz=round(-1450 + random.gauss(0, 15), 1),
+            spectrum_db=[round(-30 + random.gauss(0, 0.6)
+                               + (snr * 0.9 if abs(i - 128) < 77 else 0)
+                               + (12 if abs(i - 128) < 1 else 0), 1) for i in range(256)],
+            spectrum_span_hz=2.0e6,
             message="Demo data (no receiver connected)",
         )
         time.sleep(0.25)
@@ -388,12 +463,17 @@ def main():
     ap.add_argument("--demod-port", type=int, default=6001)
     ap.add_argument("--decoder-port", type=int, default=6002)
     ap.add_argument("--samples-port", type=int, default=5002)
+    ap.add_argument("--spectrum-port", type=int, default=5000,
+                    help="goesrecv raw SDR sample publisher for the spectrum view; 0 turns it off")
+    ap.add_argument("--sample-rate", type=float, default=2.0e6,
+                    help="SDR sample rate from goesrecv.conf, for the spectrum axis (default 2e6)")
     ap.add_argument("--satdump-url", default="http://127.0.0.1:8081/api")
     args = ap.parse_args()
 
     snap = Snapshot(args.source)
     if args.source == "goestools":
-        target = lambda: run_goestools(snap, args.goesrecv_host, args.demod_port, args.decoder_port, args.samples_port)
+        target = lambda: run_goestools(snap, args.goesrecv_host, args.demod_port, args.decoder_port, args.samples_port,
+                                       args.spectrum_port or None, args.sample_rate)
     elif args.source == "satdump":
         target = lambda: run_satdump(snap, args.satdump_url)
     else:

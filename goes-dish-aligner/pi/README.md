@@ -56,6 +56,11 @@ What each figure comes from:
 - **Signal power** is the inverse of the AGC gain. It's relative, so use it to compare
   positions, not as an absolute level.
 
+- **Spectrum** comes from goesrecv's raw SDR samples (`[rtlsdr.sample_publisher]`, port 5000).
+  The HRIT signal shows as a raised bump about 1.2 MHz wide in the shaded band, even before
+  it locks. The narrow spike exactly in the middle is the SDR itself. If your sample rate
+  isn't 2 MS/s, pass `--sample-rate` so the axis is right; `--spectrum-port 0` turns it off.
+
 If goesrecv runs on another machine, add `--goesrecv-host <its-address>`.
 
 ## Run with SatDump

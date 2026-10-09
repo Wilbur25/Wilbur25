@@ -242,6 +242,11 @@ footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
       <svg id="ls-spark" viewBox="0 0 600 140" role="img" aria-label="SNR over the last two minutes"></svg>
       <div class="spark-tip" id="ls-tip" hidden></div>
     </div>
+    <div class="spark-wrap">
+      <span class="label">Spectrum around the tuned frequency</span>
+      <svg id="ls-spec" viewBox="0 0 600 170" role="img" aria-label="Live radio spectrum around the tuned frequency"></svg>
+      <p class="note" id="ls-spec-note">Waiting for spectrum data from the Pi.</p>
+    </div>
     <p class="note">Rough guide for HRIT: a steady lock with SNR above about 4 dB decodes; 6 dB or more gives margin for rain. When peaking, move in small steps and wait two or three seconds each time, because the readings average over a moment.</p>
   </section>
 
@@ -736,7 +741,63 @@ footer { font-size: .85rem; color: var(--muted); display: grid; gap: 6px; }
     setV("ls-pwr", d.power_db == null ? "—" : `${d.power_db.toFixed(1)}<small> dB</small>`);
     setV("ls-freq", d.freq_offset_hz == null ? "—" : `${d.freq_offset_hz >= 0 ? "+" : ""}${Math.round(d.freq_offset_hz)}<small> Hz</small>`);
     lsSpark();
+    lsSpec(d);
     lsTone(snr, d.lock);
+  }
+
+  function lsSpec(d) {
+    const svg = $("ls-spec"), note = $("ls-spec-note"), db = d.spectrum_db;
+    if (!db || !db.length) {
+      svg.innerHTML = "";
+      note.textContent = d.source === "goestools"
+        ? "No spectrum yet. It needs [rtlsdr.sample_publisher] on port 5000 in goesrecv.conf."
+        : "Spectrum is available with goestools.";
+      return;
+    }
+    const span = d.spectrum_span_hz || 2e6, f0 = (sigFor().f);
+    // Max-hold trace that slowly sinks, so a brief bump while sweeping stays visible.
+    if (!LS.hold || LS.hold.length !== db.length) LS.hold = db.slice();
+    LS.hold = LS.hold.map((h, i) => Math.max(db[i], h - 0.15));
+    // Skip the centre bins for scaling: the SDR's DC spike would flatten everything else.
+    const mid = db.length / 2, pool = db.filter((_, i) => Math.abs(i - mid) > 2);
+    const sorted = pool.slice().sort((a, b) => a - b);
+    const floor = sorted[Math.floor(sorted.length * 0.1)];
+    const lo = Math.floor((floor - 3) / 5) * 5, hi = Math.max(lo + 15, Math.ceil((Math.max(...LS.hold.filter((_, i) => Math.abs(i - mid) > 2)) + 2) / 5) * 5);
+    const W = Math.max(300, Math.round(svg.clientWidth || 600)), H = 170, L = 30, R = 8, T = 10, B = 24;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const x = (i) => L + (i / (db.length - 1)) * (W - L - R);
+    const xf = (hz) => L + ((hz + span / 2) / span) * (W - L - R);
+    const y = (v) => T + (1 - (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * (H - T - B);
+    let s = "";
+    // HRIT occupies about 1.2 MHz; shade where the bump should appear.
+    const bw = sigFor().id === "grb" ? 9.8e6 : 1.2e6;
+    s += `<rect x="${xf(-bw / 2)}" y="${T}" width="${xf(bw / 2) - xf(-bw / 2)}" height="${H - T - B}" fill="var(--accent)" opacity=".07"/>`;
+    for (let g = lo; g <= hi; g += 5) s += `<line x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(g) + 4}" text-anchor="end" font-size="10">${g}</text>`;
+    const ticks = W < 500 ? [-span / 2, 0, span / 2] : [-span / 2, -span / 4, 0, span / 4, span / 2];
+    for (const off of ticks) {
+      const a = Math.abs(off), mag = a >= 1e6 ? `${+(a / 1e6).toFixed(2)} MHz` : `${a / 1e3} kHz`;
+      const lbl = off === 0 ? `${f0.toFixed(1)} MHz` : `${off > 0 ? "+" : "−"}${mag}`;
+      s += `<text x="${xf(off)}" y="${H - 6}" text-anchor="${off === -span / 2 ? "start" : off === span / 2 ? "end" : "middle"}" font-size="10">${lbl}</text>`;
+    }
+    const pts = (arr) => arr.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    s += `<polyline points="${pts(LS.hold)}" fill="none" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>`;
+    s += `<polygon points="${x(0)},${y(lo)} ${pts(db)} ${x(db.length - 1)},${y(lo)}" fill="var(--accent)" opacity=".14"/>`;
+    s += `<polyline points="${pts(db)}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"/>`;
+    svg.innerHTML = s;
+    // How far the middle of the band sits above the noise either side of it.
+    const bins = db.length, inBand = [], outBand = [];
+    db.forEach((v, i) => {
+      const hz = (i / (bins - 1) - 0.5) * span;
+      if (Math.abs(i - mid) <= 2) return;
+      if (Math.abs(hz) < bw * 0.35) inBand.push(v); else if (Math.abs(hz) > bw * 0.65) outBand.push(v);
+    });
+    const avg = (a) => a.reduce((p, c) => p + c, 0) / a.length;
+    if (inBand.length && outBand.length) {
+      const rise = avg(inBand) - avg(outBand);
+      note.textContent = rise > 1
+        ? `Signal bump ${rise.toFixed(1)} dB above the noise. You're on the satellite; peak it.`
+        : `No bump in the shaded band yet (${rise.toFixed(1)} dB). The spike exactly in the middle is the SDR itself, not the satellite.`;
+    }
   }
 
   function lsSpark() {

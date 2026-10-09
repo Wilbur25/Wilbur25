@@ -88,8 +88,15 @@ def m2m4_snr_db(iq):
 def run_goestools(snap, host, demod_port, decoder_port, samples_port):
     try:
         import pynng
-    except ImportError:
-        snap.update(message="pynng is not installed. Run: pip3 install pynng")
+    except ImportError as e:
+        import sys
+        if isinstance(e, ModuleNotFoundError) and e.name == "pynng":
+            msg = (f"pynng isn't available to {sys.executable}. Start the bridge with "
+                   "~/goes-venv/bin/python, or install it there: ~/goes-venv/bin/pip install pynng")
+        else:
+            msg = f"pynng is installed but failed to load: {e}"
+        print(msg)
+        snap.update(message=msg)
         return
 
     packets = collections.deque()  # (time, viterbi_bits, rs_bytes, ok)
